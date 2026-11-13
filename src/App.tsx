@@ -20,8 +20,7 @@ const acervoInicial: ItemAcervo[] = [
     tier: 'S',
     status: 'Zerado // Spec Ops',
     data: 'out 2026',
-    comentario:
-      'Clássico absoluto, campanha e Spec Ops insanos do início ao fim.',
+    comentario: 'Clássico absoluto, campanha e Spec Ops insanos do início ao fim.',
     capa: 'https://images.unsplash.com/photo-1542751371-adc38448a05e?auto=format&fit=crop&w=600&h=900&q=80',
   },
   {
@@ -51,8 +50,7 @@ const acervoInicial: ItemAcervo[] = [
     tier: 'B',
     status: 'Cine Live // Terror',
     data: 'jul 2025',
-    comentario:
-      'Ambientação boa na fazenda isolada, valeu a madrugada com a galera.',
+    comentario: 'Ambientação boa na fazenda isolada, valeu a madrugada com a galera.',
     capa: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=600&h=900&q=80',
   },
 ];
@@ -78,14 +76,16 @@ const estiloTier = {
 
 export default function App() {
   const [itens, setItens] = useState<ItemAcervo[]>(() => {
-    const salvo = localStorage.getItem('pvzra_acervo_v2');
-    return salvo ? JSON.parse(salvo) : acervoInicial;
+    try {
+      const salvo = localStorage.getItem('pvzra_acervo_v2');
+      return salvo ? JSON.parse(salvo) : acervoInicial;
+    } catch {
+      return acervoInicial;
+    }
   });
 
   const [filtro, setFiltro] = useState<'todos' | 'jogo' | 'filme'>('todos');
-  const [abaCodigo, setAbaCodigo] = useState<'acervo.py' | 'chat.sql'>(
-    'acervo.py'
-  );
+  const [abaCodigo, setAbaCodigo] = useState<'acervo.py' | 'chat.sql'>('acervo.py');
   const [horario, setHorario] = useState({ data: '', hora: '' });
 
   // Estados do Painel Admin
@@ -105,6 +105,18 @@ export default function App() {
   const [novaCapa, setNovaCapa] = useState('');
   const [novoComentario, setNovoComentario] = useState('');
 
+  // Estado da Busca na API
+  const [buscandoCapa, setBuscandoCapa] = useState(false);
+
+  useEffect(() => {
+    if (!painelAberto) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPainelAberto(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [painelAberto]);
+
   useEffect(() => {
     localStorage.setItem('pvzra_acervo_v2', JSON.stringify(itens));
   }, [itens]);
@@ -113,27 +125,10 @@ export default function App() {
     const atualizarRelogio = () => {
       const d = new Date();
       const dias = ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sáb'];
-      const meses = [
-        'jan',
-        'fev',
-        'mar',
-        'abr',
-        'mai',
-        'jun',
-        'jul',
-        'ago',
-        'set',
-        'out',
-        'nov',
-        'dez',
-      ];
+      const meses = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
       setHorario({
-        data: `${dias[d.getDay()]}, ${String(d.getDate()).padStart(2, '0')} ${
-          meses[d.getMonth()]
-        }`,
-        hora: `${String(d.getHours()).padStart(2, '0')}:${String(
-          d.getMinutes()
-        ).padStart(2, '0')}`,
+        data: `${dias[d.getDay()]}, ${String(d.getDate()).padStart(2, '0')} ${meses[d.getMonth()]}`,
+        hora: `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
       });
     };
     atualizarRelogio();
@@ -172,8 +167,60 @@ export default function App() {
     setNovaData(item.data);
     setNovaCapa(item.capa);
     setNovoComentario(item.comentario);
-    // Rola a gaveta lateral suavemente para o topo onde está o formulário
     painelRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const buscarCapaAutomatica = async () => {
+    if (!novoTitulo.trim()) return;
+    setBuscandoCapa(true);
+    
+    try {
+      if (novoTipo === 'filme') {
+        const TMDB_API_KEY = 'e1b00c94ace58cf5ac807d8f5139253c'; 
+        const res = await fetch(
+          `https://api.themoviedb.org/3/search/movie?api_key=${TMDB_API_KEY}&query=${encodeURIComponent(novoTitulo)}&language=pt-BR`
+        );
+        const data = await res.json();
+        
+        if (data.results && data.results.length > 0) {
+          const caminhoPoster = data.results[0].poster_path;
+          if (caminhoPoster) {
+            setNovaCapa(`https://image.tmdb.org/t/p/w600_and_h900_bestv2${caminhoPoster}`);
+            setNovoTitulo(data.results[0].title);
+          } else {
+            alert('Filme encontrado, mas ele não possui um pôster cadastrado no TMDB.');
+          }
+        } else {
+          alert('Nenhum filme encontrado com esse nome. Verifique a digitação!');
+        }
+      } 
+      
+      else if (novoTipo === 'jogo') {
+        const RAWG_API_KEY = 'e90faf26f4e044bb91c1eeaafc840a2d';
+
+        const res = await fetch(
+          `https://api.rawg.io/api/games?key=${RAWG_API_KEY}&search=${encodeURIComponent(novoTitulo)}&page_size=1`
+        );
+        const data = await res.json();
+
+        if (data.results && data.results.length > 0) {
+          const jogo = data.results[0];
+          if (jogo.background_image) {
+            setNovaCapa(jogo.background_image);
+            setNovoTitulo(jogo.name);
+          } else {
+            alert('Jogo encontrado, mas sem imagem cadastrada no RAWG.');
+          }
+        } else {
+          alert('Nenhum jogo encontrado com esse nome. Verifique a digitação!');
+        }
+      }
+    } catch (error) {
+      console.error(error);
+      alert('Erro de conexão ao buscar a capa.');
+    } finally {
+      setBuscandoCapa(false);
+    }
   };
 
   const handleSalvarItem = (e: React.FormEvent) => {
@@ -185,7 +232,6 @@ export default function App() {
       'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=600&h=900&q=80';
 
     if (editandoId !== null) {
-      // Atualiza item existente mantendo a posição na lista
       setItens(
         itens.map((item) =>
           item.id === editandoId
@@ -194,11 +240,7 @@ export default function App() {
                 titulo: novoTitulo,
                 tipo: novoTipo,
                 tier: novoTier,
-                status:
-                  novoStatus ||
-                  (novoTipo === 'jogo'
-                    ? 'Zerado em Live'
-                    : 'Assistido em Live'),
+                status: novoStatus || (novoTipo === 'jogo' ? 'Zerado em Live' : 'Assistido em Live'),
                 data: novaData || 'nov 2026',
                 comentario: novoComentario || 'Sem comentários adicionais.',
                 capa: capaFinal,
@@ -207,15 +249,12 @@ export default function App() {
         )
       );
     } else {
-      // Cria novo item no topo
       const novoItem: ItemAcervo = {
         id: Date.now(),
         titulo: novoTitulo,
         tipo: novoTipo,
         tier: novoTier,
-        status:
-          novoStatus ||
-          (novoTipo === 'jogo' ? 'Zerado em Live' : 'Assistido em Live'),
+        status: novoStatus || (novoTipo === 'jogo' ? 'Zerado em Live' : 'Assistido em Live'),
         data: novaData || 'nov 2026',
         comentario: novoComentario || 'Sem comentários adicionais.',
         capa: capaFinal,
@@ -314,8 +353,7 @@ export default function App() {
           </div>
 
           <p className="mt-6 text-mute font-light text-base sm:text-lg max-w-xl leading-relaxed">
-            Todos os jogos que zeramos em campanha e os filmes que sobreviveram
-            ao nosso react na madrugada.
+            Todos os jogos que zeramos em campanha e os filmes que sobreviveram ao nosso react na madrugada.
           </p>
         </div>
 
@@ -325,9 +363,7 @@ export default function App() {
             <button
               onClick={() => setAbaCodigo('acervo.py')}
               className={`flex items-center gap-2 px-3.5 text-xs border-r border-white/[0.08] relative transition ${
-                abaCodigo === 'acervo.py'
-                  ? 'text-ink bg-white/[0.03]'
-                  : 'text-dim hover:text-mute'
+                abaCodigo === 'acervo.py' ? 'text-ink bg-white/[0.03]' : 'text-dim hover:text-mute'
               }`}
             >
               <b className="w-2 h-2 rounded-sm bg-[#ffc773]" />
@@ -339,9 +375,7 @@ export default function App() {
             <button
               onClick={() => setAbaCodigo('chat.sql')}
               className={`flex items-center gap-2 px-3.5 text-xs border-r border-white/[0.08] relative transition ${
-                abaCodigo === 'chat.sql'
-                  ? 'text-ink bg-white/[0.03]'
-                  : 'text-dim hover:text-mute'
+                abaCodigo === 'chat.sql' ? 'text-ink bg-white/[0.03]' : 'text-dim hover:text-mute'
               }`}
             >
               <b className="w-2 h-2 rounded-sm bg-teal-light" />
@@ -578,7 +612,7 @@ export default function App() {
                         value={senhaInput}
                         onChange={(e) => setSenhaInput(e.target.value)}
                         placeholder="Senha do admin..."
-                        className="w-full px-3.5 py-2.5 rounded-xl bg-[#05090a] border border-white/10 font-mono text-sm text-ink focus:outline-none focus:border-teal"
+                        className="w-full px-3.5 py-2.5 rounded-xl bg-bg border border-white/10 font-mono text-sm text-ink focus:outline-none focus:border-teal"
                         autoFocus
                       />
                       {erroSenha && (
@@ -618,14 +652,24 @@ export default function App() {
                         <label className="block font-mono text-[11px] text-mute mb-1">
                           Título da Obra *
                         </label>
-                        <input
-                          type="text"
-                          required
-                          value={novoTitulo}
-                          onChange={(e) => setNovoTitulo(e.target.value)}
-                          placeholder="Ex: Resident Evil 4"
-                          className="w-full px-3 py-2 rounded-lg bg-[#05090a] border border-white/10 text-sm text-ink focus:outline-none focus:border-teal"
-                        />
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            required
+                            value={novoTitulo}
+                            onChange={(e) => setNovoTitulo(e.target.value)}
+                            placeholder="Ex: Resident Evil 4"
+                            className="flex-1 px-3 py-2 rounded-lg bg-bg border border-white/10 text-sm text-ink focus:outline-none focus:border-teal"
+                          />
+                          <button
+                            type="button"
+                            onClick={buscarCapaAutomatica}
+                            disabled={buscandoCapa || !novoTitulo.trim()}
+                            className="px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-teal-light font-mono text-xs hover:bg-teal/10 hover:border-teal/30 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+                          >
+                            {buscandoCapa ? 'Buscando...' : '🔍 Buscar'}
+                          </button>
+                        </div>
                       </div>
 
                       <div className="grid grid-cols-2 gap-3">
@@ -638,7 +682,7 @@ export default function App() {
                             onChange={(e) =>
                               setNovoTipo(e.target.value as 'jogo' | 'filme')
                             }
-                            className="w-full px-3 py-2 rounded-lg bg-[#05090a] border border-white/10 font-mono text-xs text-ink focus:outline-none focus:border-teal"
+                            className="w-full px-3 py-2 rounded-lg bg-bg border border-white/10 font-mono text-xs text-ink focus:outline-none focus:border-teal"
                           >
                             <option value="filme">🍿 Filme</option>
                             <option value="jogo">🎮 Jogo</option>
@@ -656,7 +700,7 @@ export default function App() {
                                 e.target.value as 'S' | 'A' | 'B' | 'C'
                               )
                             }
-                            className="w-full px-3 py-2 rounded-lg bg-[#05090a] border border-white/10 font-mono text-xs text-ink focus:outline-none focus:border-teal"
+                            className="w-full px-3 py-2 rounded-lg bg-bg border border-white/10 font-mono text-xs text-ink focus:outline-none focus:border-teal"
                           >
                             <option value="S">Tier S (Verde)</option>
                             <option value="A">Tier A (Âmbar)</option>
@@ -676,7 +720,7 @@ export default function App() {
                             value={novoStatus}
                             onChange={(e) => setNovoStatus(e.target.value)}
                             placeholder="Ex: Zerado em Live"
-                            className="w-full px-3 py-2 rounded-lg bg-[#05090a] border border-white/10 font-mono text-xs text-ink focus:outline-none focus:border-teal"
+                            className="w-full px-3 py-2 rounded-lg bg-bg border border-white/10 font-mono text-xs text-ink focus:outline-none focus:border-teal"
                           />
                         </div>
                         <div>
@@ -688,7 +732,7 @@ export default function App() {
                             value={novaData}
                             onChange={(e) => setNovaData(e.target.value)}
                             placeholder="Ex: nov 2026"
-                            className="w-full px-3 py-2 rounded-lg bg-[#05090a] border border-white/10 font-mono text-xs text-ink focus:outline-none focus:border-teal"
+                            className="w-full px-3 py-2 rounded-lg bg-bg border border-white/10 font-mono text-xs text-ink focus:outline-none focus:border-teal"
                           />
                         </div>
                       </div>
@@ -702,7 +746,7 @@ export default function App() {
                           value={novaCapa}
                           onChange={(e) => setNovaCapa(e.target.value)}
                           placeholder="https://..."
-                          className="w-full px-3 py-2 rounded-lg bg-[#05090a] border border-white/10 font-mono text-xs text-ink focus:outline-none focus:border-teal"
+                          className="w-full px-3 py-2 rounded-lg bg-bg border border-white/10 font-mono text-xs text-ink focus:outline-none focus:border-teal"
                         />
                       </div>
 
@@ -715,7 +759,7 @@ export default function App() {
                           value={novoComentario}
                           onChange={(e) => setNovoComentario(e.target.value)}
                           placeholder="O que achou da experiência em live?"
-                          className="w-full px-3 py-2 rounded-lg bg-[#05090a] border border-white/10 text-sm text-ink focus:outline-none focus:border-teal resize-none"
+                          className="w-full px-3 py-2 rounded-lg bg-bg border border-white/10 text-sm text-ink focus:outline-none focus:border-teal resize-none"
                         />
                       </div>
 
@@ -761,7 +805,7 @@ export default function App() {
                               className={`flex items-center justify-between gap-2.5 p-2 rounded-xl border transition ${
                                 estaEditando
                                   ? 'bg-teal/10 border-teal/50'
-                                  : 'bg-[#05090a] border-white/[0.06]'
+                                  : 'bg-bg border-white/[0.06]'
                               }`}
                             >
                               <div className="flex items-center gap-2.5 min-w-0">
