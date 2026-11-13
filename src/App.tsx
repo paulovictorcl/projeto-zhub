@@ -287,21 +287,11 @@ export default function App() {
       {/* Topo / Brand */}
       <nav className="relative z-10 max-w-6xl mx-auto px-6 pt-8 pb-4 flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <div className="relative w-14 h-14 rounded-full p-[3px] avatar-ring">
-            <div className="w-full h-full rounded-full bg-bg flex items-center justify-center font-extrabold text-lg tracking-tighter border-2 border-bg overflow-hidden">
-              <img
-                src="/pvzra-simbolo-claro.svg"
-                alt="pvzra"
-                className="w-[62%] h-auto"
-              />
-            </div>
-            <i className="absolute right-0.5 bottom-0.5 w-3.5 h-3.5 rounded-full bg-teal border-2 border-bg shadow-[0_0_10px_#0dbb95]" />
-          </div>
           <div>
-            <div className="font-bold text-2xl tracking-[-0.03em] leading-none">
+            <div className="font-bold text-4xl tracking-[-0.03em] leading-none">
               pv<span className="text-teal">z</span>ra
             </div>
-            <div className="font-mono text-xs text-mute mt-1 tracking-tight">
+            <div className="font-mono text-sm text-mute mt-1.5 tracking-tight">
               entretenimento ao vivo
             </div>
           </div>
