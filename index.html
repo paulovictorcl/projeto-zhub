@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>pvzra — Hub & Acervo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Sora:wght@200;300;400;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Sora', 'sans-serif'],
+              mono: ['JetBrains Mono', 'monospace'],
+            },
+            colors: {
+              bg: '#05090a',
+              ink: '#f1f5f4',
+              mute: '#8a9e9a',
+              dim: '#566a66',
+              teal: {
+                DEFAULT: '#0dbb95',
+                light: '#46e3be',
+              },
+            },
+          },
+        },
+      };
+    </script>
+    <style>
+      body {
+        background-color: #05090a;
+        color: #f1f5f4;
+        overflow-x: hidden;
+      }
+      /* Fundo e Grade Rotacionada do Overlay */
+      .bg-wash {
+        background: radial-gradient(
+            60% 75% at 0% 100%,
+            rgba(24, 120, 108, 0.35),
+            transparent 70%
+          ),
+          radial-gradient(
+            55% 70% at 100% 0%,
+            rgba(30, 108, 104, 0.3),
+            transparent 70%
+          ),
+          linear-gradient(160deg, #0b1214 0%, #071010 45%, #050b0b 100%);
+      }
+      .bg-grid {
+        background-image: linear-gradient(
+            rgba(255, 255, 255, 0.03) 1px,
+            transparent 1px
+          ),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+        background-size: 48px 48px;
+        transform: rotate(-8deg) scale(1.25);
+        animation: gridMove 18s linear infinite;
+        mask-image: radial-gradient(
+          80% 80% at 50% 40%,
+          #000 30%,
+          transparent 90%
+        );
+        -webkit-mask-image: radial-gradient(
+          80% 80% at 50% 40%,
+          #000 30%,
+          transparent 90%
+        );
+      }
+      @keyframes gridMove {
+        to {
+          background-position: 48px 48px;
+        }
+      }
+      /* Anel Giratório do Avatar */
+      @property --a {
+        syntax: '<angle>';
+        inherits: false;
+        initial-value: 0deg;
+      }
+      .avatar-ring {
+        background: conic-gradient(
+          from var(--a, 0deg),
+          #0dbb95,
+          #46e3be 25%,
+          rgba(13, 187, 149, 0.15) 50%,
+          #0dbb95 100%
+        );
+        animation: ring 6s linear infinite;
+      }
+      @keyframes ring {
+        to {
+          --a: 360deg;
+        }
+      }
+      /* Traço de Luz Animado abaixo do Título */
+      .trace-bar {
+        transform-origin: left;
+        animation: grow 4.5s cubic-bezier(0.6, 0, 0.2, 1) infinite;
+      }
+      @keyframes grow {
+        0% {
+          transform: scaleX(0);
+        }
+        35%,
+        70% {
+          transform: scaleX(1);
+          transform-origin: left;
+        }
+        71% {
+          transform-origin: right;
+        }
+        100% {
+          transform: scaleX(0);
+          transform-origin: right;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
