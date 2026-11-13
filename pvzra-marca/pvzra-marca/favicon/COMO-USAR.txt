@@ -1,0 +1,7 @@
+Coloque os arquivos desta pasta na raiz do site e cole no <head>:
+
+<link rel="icon" href="/pvzra-favicon.svg" type="image/svg+xml">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+
+favicon-192.png e favicon-512.png servem para o manifest (PWA), se você usar.

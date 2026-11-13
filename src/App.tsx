@@ -289,7 +289,11 @@ export default function App() {
         <div className="flex items-center gap-4">
           <div className="relative w-14 h-14 rounded-full p-[3px] avatar-ring">
             <div className="w-full h-full rounded-full bg-bg flex items-center justify-center font-extrabold text-lg tracking-tighter border-2 border-bg overflow-hidden">
-              <span>PV</span>
+              <img
+                src="/pvzra-simbolo-claro.svg"
+                alt="pvzra"
+                className="w-[62%] h-auto"
+              />
             </div>
             <i className="absolute right-0.5 bottom-0.5 w-3.5 h-3.5 rounded-full bg-teal border-2 border-bg shadow-[0_0_10px_#0dbb95]" />
           </div>
