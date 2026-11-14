@@ -20,7 +20,7 @@ const APAGA_MS = 45; // tempo por caractere ao apagar
 const CURSOR_FINAL_MS = 2200; // cursor piscando depois de terminar
 const REPETE_MS = 20000; // intervalo entre uma digitação e outra
 
-function LogoDigitando() {
+function LogoDigitando({ tamanho = 'text-6xl' }: { tamanho?: string }) {
   const [visiveis, setVisiveis] = useState(0);
   const [cursor, setCursor] = useState<'digitando' | 'piscando' | 'oculto'>(
     'piscando'
@@ -73,7 +73,7 @@ function LogoDigitando() {
 
   return (
     <div
-      className="font-bold text-6xl tracking-[-0.03em] leading-none"
+      className={`font-bold ${tamanho} tracking-[-0.03em] leading-none`}
       role="img"
       aria-label="pvzra."
     >
@@ -102,8 +102,83 @@ function LogoDigitando() {
   );
 }
 
+const estaNoAdmin = () => /^\/admin\/?$/.test(window.location.pathname);
+
 const prefereMenosMovimento = () =>
   window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// ---------- Status da live (consulta /api/live, que pergunta à Twitch) ----------
+type StatusLive = { live: boolean; titulo?: string; jogo?: string };
+
+function useStatusLive() {
+  const [status, setStatus] = useState<StatusLive | null>(null); // null = ainda não sabe
+
+  useEffect(() => {
+    // pra testar o visual: ?live=1 (aceso) ou ?live=0 (apagado)
+    const forcado = new URLSearchParams(window.location.search).get('live');
+    if (forcado === '1' || forcado === '0') {
+      setStatus({ live: forcado === '1', titulo: 'Teste de status' });
+      return;
+    }
+
+    let ativo = true;
+    const consulta = async () => {
+      if (document.hidden) return;
+      try {
+        const res = await fetch('/api/live');
+        const dados = (await res.json()) as StatusLive;
+        if (ativo) setStatus(dados);
+      } catch {
+        // sem a função (ex.: rodando só com o Vite) ou sem rede: trata como offline
+        if (ativo) setStatus({ live: false });
+      }
+    };
+    consulta();
+    const intervalo = window.setInterval(consulta, 60_000);
+    document.addEventListener('visibilitychange', consulta);
+    return () => {
+      ativo = false;
+      clearInterval(intervalo);
+      document.removeEventListener('visibilitychange', consulta);
+    };
+  }, []);
+
+  return status;
+}
+
+function BotaoAoVivo() {
+  const status = useStatusLive();
+  const aoVivo = status?.live === true;
+  const dica = aoVivo
+    ? [status?.titulo, status?.jogo].filter(Boolean).join(' · ') || 'Ao vivo agora'
+    : 'Offline no momento';
+
+  return (
+    <a
+      href="https://twitch.tv/pvzra"
+      target="_blank"
+      rel="noreferrer"
+      title={dica}
+      className={`inline-flex items-center gap-2 font-mono text-xs font-medium px-4 py-2 rounded-full border transition-all duration-500 ${
+        aoVivo
+          ? 'bg-teal/15 border-teal/50 text-teal-light shadow-[0_0_22px_rgba(13,187,149,0.3)] hover:bg-teal hover:text-[#03201a]'
+          : 'bg-white/[0.03] border-white/[0.08] text-dim hover:text-mute hover:border-white/20'
+      } ${status === null ? 'opacity-0' : 'opacity-100'}`}
+    >
+      <span className="relative flex w-2 h-2" aria-hidden="true">
+        {aoVivo && (
+          <span className="absolute inset-0 rounded-full bg-teal-light opacity-75 animate-ping" />
+        )}
+        <span
+          className={`relative w-2 h-2 rounded-full ${
+            aoVivo ? 'bg-teal-light shadow-[0_0_8px_#46e3be]' : 'bg-dim'
+          }`}
+        />
+      </span>
+      {aoVivo ? 'ao vivo' : 'offline'}
+    </a>
+  );
+}
 
 // ---------- Editor de código que se digita ----------
 type Token = [keyof typeof corToken, string];
@@ -117,7 +192,17 @@ const corToken = {
 };
 let editorJaDigitou = false; // 1ª digitação espera a logo; trocas de aba são imediatas
 
-function EditorCodigo({ linhas }: { linhas: Token[][] }) {
+function EditorCodigo({
+  linhas,
+  aoAparecer = false,
+  quebrarLinha = false,
+}: {
+  linhas: Token[][];
+  aoAparecer?: boolean; // só começa a digitar quando o box entra na tela
+  quebrarLinha?: boolean;
+}) {
+  const caixaRef = useRef<HTMLDivElement | null>(null);
+  const [visivel, setVisivel] = useState(!aoAparecer);
   // cada caractere é um passo; cada quebra de linha também
   const total = linhas.reduce(
     (soma, l, i) =>
@@ -128,12 +213,32 @@ function EditorCodigo({ linhas }: { linhas: Token[][] }) {
   const [pronto, setPronto] = useState(false);
 
   useEffect(() => {
+    if (visivel) return;
+    const el = caixaRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      ([e]) => {
+        if (e.isIntersecting) {
+          setVisivel(true);
+          obs.disconnect();
+        }
+      },
+      { threshold: 0.5 }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [visivel]);
+
+  useEffect(() => {
     if (prefereMenosMovimento()) {
       setPronto(true);
       return;
     }
-    const primeira = !editorJaDigitou;
-    editorJaDigitou = true;
+    if (!visivel) return;
+    // o editor do topo espera a logo; os de baixo digitam assim que aparecem
+    const primeira = aoAparecer || !editorJaDigitou;
+    const atraso = aoAparecer ? 350 : primeira ? 1400 : 120;
+    if (!aoAparecer) editorJaDigitou = true;
     const posQuebras = new Set<number>();
     let acc = 0;
     linhas.forEach((l, i) => {
@@ -150,11 +255,11 @@ function EditorCodigo({ linhas }: { linhas: Token[][] }) {
       const pausa = posQuebras.has(i) ? 140 : (primeira ? 24 : 14) + Math.random() * 22;
       timer = window.setTimeout(avanca, pausa);
     };
-    timer = window.setTimeout(avanca, primeira ? 1400 : 120);
+    timer = window.setTimeout(avanca, atraso);
     return () => clearTimeout(timer);
-    // a aba é trocada via `key`, então basta rodar na montagem
+    // a aba é trocada via `key`, então basta rodar na montagem (ou ao aparecer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [visivel]);
 
   const n = pronto ? Infinity : passo;
   const cursor = (
@@ -170,7 +275,7 @@ function EditorCodigo({ linhas }: { linhas: Token[][] }) {
 
   let pos = 0;
   return (
-    <div className="p-4 leading-relaxed select-none" aria-label="código ilustrativo">
+    <div ref={caixaRef} className="p-4 leading-relaxed select-none" aria-label="código ilustrativo">
       <div className="space-y-1">
         {linhas.map((linha, li) => {
           const inicioLinha = pos;
@@ -191,7 +296,10 @@ function EditorCodigo({ linhas }: { linhas: Token[][] }) {
           if (li < linhas.length - 1) pos++; // a quebra de linha
           const cursorNoFim = ultimo === fimLinha;
           return (
-            <div key={li} className="whitespace-pre min-h-[1.25em]">
+            <div
+              key={li}
+              className={`${quebrarLinha ? 'whitespace-pre-wrap' : 'whitespace-pre'} min-h-[1.25em]`}
+            >
               <span className={`text-white/20 mr-4 ${n >= inicioLinha ? '' : 'invisible'}`}>
                 {li + 1}
               </span>
@@ -348,12 +456,14 @@ function SecaoAcervo({
   itens,
   vazio,
   extra,
+  carregando = false,
 }: {
   id?: string;
   titulo: string;
   itens: ItemAcervo[];
   vazio: string;
   extra?: React.ReactNode;
+  carregando?: boolean;
 }) {
   return (
     <section id={id} className="scroll-mt-8">
@@ -362,13 +472,29 @@ function SecaoAcervo({
           <span className="text-teal mr-1.5">//</span>
           {titulo}
           <span className="ml-2 text-xs text-dim">
-            ({itens.length} {itens.length === 1 ? 'item' : 'itens'})
+            {carregando ? '(carregando…)' : `(${itens.length} ${itens.length === 1 ? 'item' : 'itens'})`}
           </span>
         </h2>
         {extra}
       </div>
 
-      {itens.length === 0 ? (
+      {carregando ? (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-5" aria-hidden="true">
+          {[0, 1, 2, 3].map((i) => (
+            <div
+              key={i}
+              className="rounded-[20px] overflow-hidden bg-[#0c1616]/60 border border-white/[0.08] animate-pulse"
+            >
+              <div className="aspect-[2/3] bg-white/[0.03]" />
+              <div className="p-4 space-y-2">
+                <div className="h-2 w-1/3 rounded bg-white/[0.06]" />
+                <div className="h-3 w-3/4 rounded bg-white/[0.08]" />
+                <div className="h-2 w-full rounded bg-white/[0.05]" />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : itens.length === 0 ? (
         <p className="font-mono text-xs text-dim">
           <span className="text-teal/60 mr-1.5">#</span>
           {vazio}
@@ -382,6 +508,73 @@ function SecaoAcervo({
           </AnimatePresence>
         </motion.div>
       )}
+    </section>
+  );
+}
+
+// ---------- Sugestões (vão pro Discord) ----------
+// TODO: trocar pelo convite do servidor (ou link direto do canal #sugestões)
+const DISCORD_URL = 'https://discord.gg/pvzvMPw';
+
+function SecaoSugestoes() {
+  return (
+    <section id="sugerir" className="scroll-mt-8">
+      <div className="flex items-center border-b border-white/[0.08] pb-4 mb-8">
+        <h2 className="font-mono text-sm font-normal text-mute">
+          <span className="text-teal mr-1.5">//</span>
+          sugerir()
+        </h2>
+      </div>
+
+      <div className="relative overflow-hidden rounded-[20px] bg-[#0c1616]/60 border border-white/[0.08] backdrop-blur-xl shadow-[0_20px_50px_rgba(0,0,0,0.45)] p-6 sm:p-10 grid gap-8 lg:grid-cols-12 items-center">
+        <div
+          className="pointer-events-none absolute -right-24 -top-24 w-80 h-80 rounded-full bg-teal/10 blur-3xl"
+          aria-hidden="true"
+        />
+
+        <div className="relative lg:col-span-7">
+          <h3 className="leading-tight">
+            <span className="block font-extralight text-2xl sm:text-3xl tracking-[-0.03em] text-ink/90">
+              Tem um filme ou jogo
+            </span>
+            <span className="block font-extrabold text-3xl sm:text-4xl tracking-[-0.045em] text-ink">
+              pra próxima live?
+            </span>
+          </h3>
+          <p className="mt-4 text-mute font-light text-sm sm:text-base max-w-lg leading-relaxed">
+            Manda a sugestão no nosso Discord. O pessoal vota, a gente escolhe, e o
+            que rolar na live vem parar aqui no acervo.</p>
+          <a
+            href={DISCORD_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="mt-7 inline-flex items-center gap-2.5 font-mono text-sm font-medium pl-4 pr-5 py-2.5 rounded-full bg-teal text-[#03201a] shadow-[0_0_24px_rgba(13,187,149,0.35)] hover:bg-teal-light hover:shadow-[0_0_32px_rgba(70,227,190,0.5)] transition-all"
+          >
+            <svg viewBox="0 0 24 24" className="w-4 h-4" fill="currentColor" aria-hidden="true">
+              <path d="M20.32 4.37A19.8 19.8 0 0 0 15.4 2.84a13.7 13.7 0 0 0-.63 1.3 18.4 18.4 0 0 0-5.5 0 12.6 12.6 0 0 0-.64-1.3 19.7 19.7 0 0 0-4.93 1.53C.6 9.05-.24 13.6.18 18.1a19.9 19.9 0 0 0 6.04 3.05c.49-.66.92-1.36 1.3-2.1a12.9 12.9 0 0 1-2.04-.98c.17-.12.34-.25.5-.38a14.2 14.2 0 0 0 12.06 0c.17.14.33.26.5.38-.65.39-1.33.71-2.05.98.38.74.81 1.44 1.3 2.1a19.8 19.8 0 0 0 6.05-3.05c.5-5.22-.84-9.73-3.52-13.73ZM8.02 15.33c-1.18 0-2.15-1.08-2.15-2.42 0-1.33.95-2.42 2.15-2.42 1.2 0 2.17 1.1 2.15 2.42 0 1.34-.95 2.42-2.15 2.42Zm7.96 0c-1.18 0-2.15-1.08-2.15-2.42 0-1.33.95-2.42 2.15-2.42 1.2 0 2.17 1.1 2.15 2.42 0 1.34-.94 2.42-2.15 2.42Z" />
+            </svg>
+            Sugerir no Discord
+            <span aria-hidden="true">→</span>
+          </a>
+        </div>
+
+        <div className="relative lg:col-span-5 rounded-2xl overflow-hidden bg-[#05090a]/70 border border-white/[0.08] font-mono text-xs sm:text-[13px] leading-relaxed">
+          <div className="flex items-center h-9 px-3.5 border-b border-white/[0.08] bg-white/[0.02] text-dim">
+            <b className="w-2 h-2 rounded-sm bg-teal-light mr-2" />
+            <span className="text-[#c4d0cd]">#sugestões</span>
+          </div>
+          <EditorCodigo
+            aoAparecer
+            quebrarLinha
+            linhas={[
+              [['k', 'INSERT INTO'], ['p', ' sugestoes']],
+              [['k', 'VALUES'], ['p', ' ('], ['s', "'seu_filme_ou_jogo'"], ['p', ');']],
+              [],
+              [['c', '-- as sugestões com mais likes, ganham!']],
+            ]}
+          />
+        </div>
+      </div>
     </section>
   );
 }
@@ -449,50 +642,114 @@ const estiloTier = {
 };
 
 export default function App() {
-  const [itens, setItens] = useState<ItemAcervo[]>(() => {
-    try {
-      const salvo = localStorage.getItem('pvzra_acervo_v2');
-      return salvo ? JSON.parse(salvo) : acervoInicial;
-    } catch {
-      return acervoInicial;
-    }
-  });
+  // o acervo vem do banco (via /api/acervo)
+  const [itens, setItens] = useState<ItemAcervo[]>([]);
+  const [carregando, setCarregando] = useState(true);
+  // false quando a API não responde (ex.: rodando só com `npm run dev`)
+  const [apiOk, setApiOk] = useState(true);
 
   const [abaCodigo, setAbaCodigo] = useState<'acervo.py' | 'chat.sql'>('acervo.py');
   const [horario, setHorario] = useState({ data: '', hora: '' });
 
-  // Estados do Painel Admin
-  const [painelAberto, setPainelAberto] = useState(false);
-  const [autenticado, setAutenticado] = useState(false);
+  // Painel Admin: página própria no endereço /admin
+  const [rotaAdmin, setRotaAdmin] = useState(estaNoAdmin);
+  // a senha fica só nesta aba (sessionStorage) e vai junto em cada alteração;
+  // quem confere é o servidor (variável ADMIN_SENHA na Vercel)
+  const [senhaAdmin, setSenhaAdmin] = useState(
+    () => sessionStorage.getItem('pvzra_admin_senha') ?? ''
+  );
+  const autenticado = senhaAdmin !== '';
+  const [entrando, setEntrando] = useState(false);
+  const [salvando, setSalvando] = useState(false);
+  const [avisoAdmin, setAvisoAdmin] = useState<{ tipo: 'erro' | 'ok'; txt: string } | null>(null);
   const [senhaInput, setSenhaInput] = useState('');
   const [erroSenha, setErroSenha] = useState(false);
+  const [msgErroLogin, setMsgErroLogin] = useState('');
+  const [tentativas, setTentativas] = useState(0);
   const [editandoId, setEditandoId] = useState<number | null>(null);
-  const painelRef = useRef<HTMLElement | null>(null);
 
   // Estados do Formulário
   const [novoTitulo, setNovoTitulo] = useState('');
   const [novoTipo, setNovoTipo] = useState<'jogo' | 'filme'>('filme');
   const [novoTier, setNovoTier] = useState<'S' | 'A' | 'B' | 'C'>('S');
-  const [novoStatus, setNovoStatus] = useState('Assistido em Live');
-  const [novaData, setNovaData] = useState('nov 2026');
+  const [novoStatus, setNovoStatus] = useState('Cine-Z');
+  const [novaData, setNovaData] = useState('');
   const [novaCapa, setNovaCapa] = useState('');
   const [novoComentario, setNovoComentario] = useState('');
 
   // Estado da Busca na API
   const [buscandoCapa, setBuscandoCapa] = useState(false);
 
+  // acompanha o voltar/avançar do navegador entre o site e o /admin
   useEffect(() => {
-    if (!painelAberto) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setPainelAberto(false);
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [painelAberto]);
+    const onPop = () => setRotaAdmin(estaNoAdmin());
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
 
   useEffect(() => {
-    localStorage.setItem('pvzra_acervo_v2', JSON.stringify(itens));
-  }, [itens]);
+    document.title = rotaAdmin ? 'Painel de Admin.' : 'Painel de Admin.';
+    window.scrollTo(0, 0);
+  }, [rotaAdmin]);
+
+  const irParaSite = (e?: React.MouseEvent) => {
+    e?.preventDefault();
+    window.history.pushState(null, '', '/');
+    setRotaAdmin(false);
+  };
+
+  // carrega o acervo (no painel, pula o cache pra ver o estado mais recente)
+  useEffect(() => {
+    let ativo = true;
+    const url = rotaAdmin ? `/api/acervo?t=${Date.now()}` : '/api/acervo';
+    fetch(url)
+      .then((r) => (r.ok ? r.json() : Promise.reject(r.status)))
+      .then((dados: ItemAcervo[]) => {
+        if (!Array.isArray(dados)) throw new Error('resposta inválida');
+        if (ativo) {
+          setItens(dados);
+          setApiOk(true);
+        }
+      })
+      .catch(() => {
+        // sem API: mostra os exemplos, só pra visualização
+        if (ativo) {
+          setItens(acervoInicial);
+          setApiOk(false);
+        }
+      })
+      .finally(() => ativo && setCarregando(false));
+    return () => {
+      ativo = false;
+    };
+  }, [rotaAdmin]);
+
+  const sair = () => {
+    limparFormulario();
+    setSenhaAdmin('');
+    sessionStorage.removeItem('pvzra_admin_senha');
+  };
+
+  // chamada autenticada à API; se a senha deixar de valer, desloga
+  const chamarApi = async (metodo: string, url: string, corpo?: unknown) => {
+    const res = await fetch(url, {
+      method: metodo,
+      headers: { 'Content-Type': 'application/json', 'x-admin-senha': senhaAdmin },
+      body: corpo === undefined ? undefined : JSON.stringify(corpo),
+    });
+    if (res.status === 401) {
+      sair();
+      throw new Error('Sessão expirada: entre de novo.');
+    }
+    const dados = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(dados.erro || `Erro ${res.status}`);
+    return dados;
+  };
+
+  const avisar = (tipo: 'erro' | 'ok', txt: string) => {
+    setAvisoAdmin({ tipo, txt });
+    window.setTimeout(() => setAvisoAdmin((a) => (a?.txt === txt ? null : a)), 4000);
+  };
 
   useEffect(() => {
     const atualizarRelogio = () => {
@@ -509,14 +766,34 @@ export default function App() {
     return () => clearInterval(timer);
   }, []);
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (senhaInput === 'pvzra') {
-      setAutenticado(true);
-      setErroSenha(false);
-      setSenhaInput('');
-    } else {
+    if (!senhaInput || entrando) return;
+    setEntrando(true);
+    try {
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ senha: senhaInput }),
+      });
+      if (res.ok) {
+        setSenhaAdmin(senhaInput);
+        sessionStorage.setItem('pvzra_admin_senha', senhaInput);
+        setErroSenha(false);
+        setSenhaInput('');
+      } else {
+        setMsgErroLogin(
+          res.status === 401 ? 'chave incorreta, tenta de novo.' : 'servidor indisponível no momento.'
+        );
+        setErroSenha(true);
+        setTentativas((t) => t + 1);
+      }
+    } catch {
+      setMsgErroLogin('sem conexão com o servidor.');
       setErroSenha(true);
+      setTentativas((t) => t + 1);
+    } finally {
+      setEntrando(false);
     }
   };
 
@@ -540,7 +817,7 @@ export default function App() {
     setNovaData(item.data);
     setNovaCapa(item.capa);
     setNovoComentario(item.comentario);
-    painelRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const buscarCapaAutomatica = async () => {
@@ -596,51 +873,72 @@ export default function App() {
     }
   };
 
-  const handleSalvarItem = (e: React.FormEvent) => {
+  const handleSalvarItem = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!novoTitulo.trim()) return;
+    if (!novoTitulo.trim() || salvando) return;
 
-    const capaFinal =
-      novaCapa.trim() ||
-      'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=600&h=900&q=80';
+    const dados = {
+      titulo: novoTitulo,
+      tipo: novoTipo,
+      tier: novoTier,
+      status: novoStatus || (novoTipo === 'jogo' ? 'Zerado em Live' : 'Assistido em Live'),
+      data: novaData || 'nov 2026',
+      comentario: novoComentario || 'Sem comentários adicionais.',
+      capa:
+        novaCapa.trim() ||
+        'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=600&h=900&q=80',
+    };
 
-    if (editandoId !== null) {
-      setItens(
-        itens.map((item) =>
-          item.id === editandoId
-            ? {
-                ...item,
-                titulo: novoTitulo,
-                tipo: novoTipo,
-                tier: novoTier,
-                status: novoStatus || (novoTipo === 'jogo' ? 'Zerado em Live' : 'Assistido em Live'),
-                data: novaData || 'nov 2026',
-                comentario: novoComentario || 'Sem comentários adicionais.',
-                capa: capaFinal,
-              }
-            : item
-        )
-      );
-    } else {
-      const novoItem: ItemAcervo = {
-        id: Date.now(),
-        titulo: novoTitulo,
-        tipo: novoTipo,
-        tier: novoTier,
-        status: novoStatus || (novoTipo === 'jogo' ? 'Zerado em Live' : 'Assistido em Live'),
-        data: novaData || 'nov 2026',
-        comentario: novoComentario || 'Sem comentários adicionais.',
-        capa: capaFinal,
-      };
-      setItens([novoItem, ...itens]);
+    setSalvando(true);
+    try {
+      if (editandoId !== null) {
+        const salvo: ItemAcervo = await chamarApi('PUT', `/api/acervo?id=${editandoId}`, dados);
+        setItens((lista) => lista.map((i) => (i.id === salvo.id ? salvo : i)));
+        avisar('ok', 'Alterações salvas.');
+      } else {
+        const novo: ItemAcervo = await chamarApi('POST', '/api/acervo', dados);
+        setItens((lista) => [novo, ...lista]);
+        avisar('ok', 'Adicionado ao acervo.');
+      }
+      limparFormulario();
+    } catch (err) {
+      avisar('erro', (err as Error).message);
+    } finally {
+      setSalvando(false);
     }
-
-    limparFormulario();
   };
 
-  const handleRemoverItem = (id: number) => {
-    if (editandoId === id) limparFormulario();
-    setItens(itens.filter((item) => item.id !== id));
+  const handleRemoverItem = async (item: ItemAcervo) => {
+    if (!window.confirm(`Excluir "${item.titulo}" do acervo?`)) return;
+    try {
+      await chamarApi('DELETE', `/api/acervo?id=${item.id}`);
+      if (editandoId === item.id) limparFormulario();
+      setItens((lista) => lista.filter((i) => i.id !== item.id));
+      avisar('ok', 'Item excluído.');
+    } catch (err) {
+      avisar('erro', (err as Error).message);
+    }
+  };
+
+  // primeira carga do banco: envia o que estava salvo neste navegador (ou os exemplos)
+  const importarAcervoInicial = async () => {
+    let base: ItemAcervo[] = acervoInicial;
+    try {
+      const salvo = JSON.parse(localStorage.getItem('pvzra_acervo_v2') || 'null');
+      if (Array.isArray(salvo) && salvo.length) base = salvo;
+    } catch {
+      // ignora e usa os exemplos
+    }
+    setSalvando(true);
+    try {
+      const lista: ItemAcervo[] = await chamarApi('POST', '/api/acervo', base);
+      setItens(lista);
+      avisar('ok', `${lista.length} itens importados pro banco.`);
+    } catch (err) {
+      avisar('erro', (err as Error).message);
+    } finally {
+      setSalvando(false);
+    }
   };
 
   const porRecencia = [...itens].sort(
@@ -652,6 +950,400 @@ export default function App() {
 
   const totalJogos = itens.filter((i) => i.tipo === 'jogo').length;
   const totalFilmes = itens.filter((i) => i.tipo === 'filme').length;
+
+  // ================= Página /admin =================
+  const campo =
+    'w-full px-3.5 py-2.5 rounded-xl bg-[#05090a]/80 border border-white/10 text-sm text-ink placeholder:text-dim focus:outline-none focus:border-teal/70 focus:ring-2 focus:ring-teal/15 transition';
+  const rotulo = 'block font-mono text-[11px] text-mute mb-1.5';
+
+  if (rotaAdmin) {
+    const previa: ItemAcervo = {
+      id: editandoId ?? 0,
+      titulo: novoTitulo || 'Título da obra',
+      tipo: novoTipo,
+      tier: novoTier,
+      status: novoStatus || (novoTipo === 'jogo' ? 'Zerado em Live' : 'Assistido em Live'),
+      data: novaData || 'nov 2026',
+      comentario: novoComentario || 'O comentário rápido aparece aqui.',
+      capa:
+        novaCapa.trim() ||
+        'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=600&h=900&q=80',
+    };
+
+    return (
+      <div className="relative min-h-screen bg-bg text-ink font-sans selection:bg-teal selection:text-bg">
+        <div className="fixed inset-0 bg-wash pointer-events-none" />
+        <FundoGrade />
+
+        {!autenticado ? (
+          /* ---------- Tela de login ---------- */
+          <div className="relative z-10 min-h-screen grid place-items-center px-6 py-12">
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, ease: [0.2, 0.8, 0.2, 1] }}
+              className="w-full max-w-sm"
+            >
+              <div className="text-center mb-8">
+                <div className="inline-block text-left">
+                  <LogoDigitando tamanho="text-5xl" />
+                </div>
+                <div className="font-mono text-sm text-mute mt-2">Painel de Admin.</div>
+              </div>
+
+              <motion.form
+                key={tentativas}
+                onSubmit={handleLogin}
+                animate={tentativas ? { x: [0, -10, 9, -6, 4, 0] } : undefined}
+                transition={{ duration: 0.4 }}
+                className="rounded-2xl overflow-hidden bg-[#0a1212]/75 border border-white/[0.08] backdrop-blur-xl shadow-[0_24px_60px_rgba(0,0,0,0.5)]"
+              >
+                <div className="flex items-stretch h-10 border-b border-white/[0.08] bg-white/[0.02] font-mono text-xs">
+                  <span className="relative flex items-center gap-2 px-3.5 text-ink bg-white/[0.03] border-r border-white/[0.08]">
+                    <b className="w-2 h-2 rounded-sm bg-[#ffc773]" />
+                    acesso.sh
+                    <span className="absolute inset-x-0 -bottom-px h-0.5 bg-teal" />
+                  </span>
+                  <span className="flex-1" />
+                  <span className="flex items-center gap-1.5 px-4 text-[11px] text-dim">
+                    <svg viewBox="0 0 24 24" className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                      <rect x="4" y="11" width="16" height="10" rx="2" />
+                      <path d="M8 11V7a4 4 0 0 1 8 0v4" />
+                    </svg>
+                    restrito
+                  </span>
+                </div>
+
+                <div className="p-6 space-y-4">
+                  <label htmlFor="senha-admin" className="block font-mono text-xs text-mute">
+                    <span className="text-teal mr-1.5">$</span>chave de acesso
+                  </label>
+                  <input
+                    id="senha-admin"
+                    type="password"
+                    value={senhaInput}
+                    onChange={(e) => {
+                      setSenhaInput(e.target.value);
+                      setErroSenha(false);
+                    }}
+                    placeholder="••••••••"
+                    autoComplete="current-password"
+                    autoFocus
+                    className={`${campo} font-mono ${erroSenha ? 'border-[#f2665a]/70 focus:border-[#f2665a]/70 focus:ring-[#f2665a]/15' : ''}`}
+                  />
+                  <p
+                    className={`font-mono text-xs text-[#ff9087] -mt-1 transition-opacity ${erroSenha ? 'opacity-100' : 'opacity-0'}`}
+                    aria-live="polite"
+                  >
+                    → {msgErroLogin || 'chave incorreta, tenta de novo.'}
+                  </p>
+                  <button
+                    type="submit"
+                    disabled={!senhaInput || entrando}
+                    className="w-full py-2.5 rounded-xl bg-teal text-[#03201a] font-mono text-sm font-medium shadow-[0_0_24px_rgba(13,187,149,0.3)] hover:bg-teal-light hover:shadow-[0_0_32px_rgba(70,227,190,0.45)] disabled:opacity-40 disabled:shadow-none disabled:cursor-not-allowed transition-all"
+                  >
+                    {entrando ? 'conferindo…' : 'entrar →'}
+                  </button>
+                </div>
+              </motion.form>
+
+              <div className="text-center mt-6">
+                <a href="/" onClick={irParaSite} className="font-mono text-xs text-dim hover:text-mute transition">
+                  ← voltar pro site
+                </a>
+              </div>
+            </motion.div>
+          </div>
+        ) : (
+          /* ---------- Painel ---------- */
+          <div className="relative z-10">
+            <nav className="max-w-6xl mx-auto px-6 pt-8 pb-6 flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-end gap-4">
+                <LogoDigitando tamanho="text-4xl" />
+                <span className="font-mono text-xs text-mute mb-1">
+                  <span className="text-teal">//</span> painel do acervo
+                </span>
+              </div>
+              <div className="flex items-center gap-2 font-mono text-xs">
+                <a
+                  href="/"
+                  onClick={irParaSite}
+                  className="px-3.5 py-2 rounded-full bg-white/[0.03] border border-white/[0.08] text-mute hover:text-ink hover:border-teal/40 transition"
+                >
+                  ver site ↗
+                </a>
+                <button
+                  onClick={sair}
+                  className="px-3.5 py-2 rounded-full bg-white/[0.03] border border-white/[0.08] text-mute hover:text-[#ff9087] hover:border-[#f2665a]/40 transition"
+                >
+                  sair
+                </button>
+              </div>
+            </nav>
+
+            <AnimatePresence>
+              {avisoAdmin && (
+                <motion.div
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: 12 }}
+                  role="status"
+                  className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-50 font-mono text-xs px-4 py-2.5 rounded-full border backdrop-blur-xl shadow-[0_12px_40px_rgba(0,0,0,0.5)] ${
+                    avisoAdmin.tipo === 'ok'
+                      ? 'bg-teal/15 border-teal/40 text-teal-light'
+                      : 'bg-[#f2665a]/15 border-[#f2665a]/40 text-[#ff9087]'
+                  }`}
+                >
+                  {avisoAdmin.tipo === 'ok' ? '✓ ' : '→ '}
+                  {avisoAdmin.txt}
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <main className="max-w-6xl mx-auto px-6 pb-20 space-y-12">
+              <div className="grid gap-8 lg:grid-cols-12 items-start">
+                {/* Formulário */}
+                <form
+                  onSubmit={handleSalvarItem}
+                  className="lg:col-span-8 rounded-[20px] bg-[#0c1616]/60 border border-white/[0.08] backdrop-blur-xl shadow-[0_20px_50px_rgba(0,0,0,0.45)] p-6 sm:p-8 space-y-5"
+                >
+                  <div className="flex items-center justify-between border-b border-white/[0.08] pb-4">
+                    <h2 className="font-mono text-sm font-normal text-mute">
+                      <span className={editandoId !== null ? 'text-[#ffc773] mr-1.5' : 'text-teal mr-1.5'}>//</span>
+                      {editandoId !== null ? 'editando_item' : 'novo_item'}
+                    </h2>
+                    {editandoId !== null && (
+                      <button
+                        type="button"
+                        onClick={limparFormulario}
+                        className="font-mono text-xs text-[#ffc773] hover:underline"
+                      >
+                        cancelar edição
+                      </button>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className={rotulo}>Título da obra *</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        required
+                        value={novoTitulo}
+                        onChange={(e) => setNovoTitulo(e.target.value)}
+                        placeholder="Ex: Resident Evil 4"
+                        className={campo}
+                      />
+                      <button
+                        type="button"
+                        onClick={buscarCapaAutomatica}
+                        disabled={buscandoCapa || !novoTitulo.trim()}
+                        className="flex-none px-4 rounded-xl bg-white/[0.04] border border-white/[0.08] text-teal-light font-mono text-xs hover:bg-teal/10 hover:border-teal/30 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {buscandoCapa ? 'buscando…' : 'buscar capa'}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className={rotulo}>Categoria</label>
+                      <div className="grid grid-cols-2 gap-1 p-1 rounded-xl bg-[#05090a]/80 border border-white/10 font-mono text-xs">
+                        {(['filme', 'jogo'] as const).map((t) => (
+                          <button
+                            key={t}
+                            type="button"
+                            onClick={() => {
+                              setNovoTipo(t);
+                              // troca o status padrão junto, sem mexer em status personalizado
+                              if (['', 'Assistido em Live', 'Zerado em Live'].includes(novoStatus)) {
+                                setNovoStatus(t === 'jogo' ? 'Zerado em Live' : 'Assistido em Live');
+                              }
+                            }}
+                            className={`py-1.5 rounded-lg transition ${
+                              novoTipo === t ? 'bg-teal/15 text-teal-light' : 'text-mute hover:text-ink'
+                            }`}
+                          >
+                            {t === 'filme' ? '🍿 filme' : '🎮 jogo'}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <label className={rotulo}>Nota (tier)</label>
+                      <div className="grid grid-cols-4 gap-1 p-1 rounded-xl bg-[#05090a]/80 border border-white/10 font-mono text-xs">
+                        {(['S', 'A', 'B', 'C'] as const).map((t) => (
+                          <button
+                            key={t}
+                            type="button"
+                            onClick={() => setNovoTier(t)}
+                            className={`py-1.5 rounded-lg border transition ${
+                              novoTier === t ? estiloTier[t].bg : 'border-transparent text-mute hover:text-ink'
+                            }`}
+                          >
+                            {t}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className={rotulo}>Status / tag</label>
+                      <input
+                        type="text"
+                        value={novoStatus}
+                        onChange={(e) => setNovoStatus(e.target.value)}
+                        placeholder="Ex: Zerado em Live"
+                        className={`${campo} font-mono text-xs`}
+                      />
+                    </div>
+                    <div>
+                      <label className={rotulo}>Data (mês ano)</label>
+                      <input
+                        type="text"
+                        value={novaData}
+                        onChange={(e) => setNovaData(e.target.value)}
+                        placeholder="Ex: nov 2026"
+                        className={`${campo} font-mono text-xs`}
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className={rotulo}>Link do pôster vertical (URL)</label>
+                    <input
+                      type="url"
+                      value={novaCapa}
+                      onChange={(e) => setNovaCapa(e.target.value)}
+                      placeholder="https://… (ou use “buscar capa”)"
+                      className={`${campo} font-mono text-xs`}
+                    />
+                  </div>
+
+                  <div>
+                    <label className={rotulo}>Comentário rápido</label>
+                    <textarea
+                      rows={3}
+                      value={novoComentario}
+                      onChange={(e) => setNovoComentario(e.target.value)}
+                      placeholder="O que achou da experiência em live?"
+                      className={`${campo} resize-none`}
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={salvando || !apiOk}
+                    className={`w-full py-3 rounded-xl font-mono text-sm font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed ${
+                      editandoId !== null
+                        ? 'bg-[#f0a63a] text-[#2a1a02] hover:bg-[#ffc773] shadow-[0_0_24px_rgba(240,166,58,0.3)]'
+                        : 'bg-teal text-[#03201a] hover:bg-teal-light shadow-[0_0_24px_rgba(13,187,149,0.3)]'
+                    }`}
+                  >
+                    {salvando
+                      ? 'salvando…'
+                      : editandoId !== null
+                        ? '✓ salvar alterações'
+                        : '+ adicionar ao acervo'}
+                  </button>
+                </form>
+
+                {/* Pré-visualização */}
+                <aside className="lg:col-span-4 lg:sticky lg:top-8">
+                  <div className="font-mono text-xs text-mute mb-3">
+                    <span className="text-teal mr-1.5">//</span>prévia no site
+                  </div>
+                  <div className="max-w-[260px] mx-auto lg:max-w-none pointer-events-none">
+                    <CartaoPoster item={previa} />
+                  </div>
+                </aside>
+              </div>
+
+              {/* Lista do acervo */}
+              <section>
+                <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/[0.08] pb-4 mb-6">
+                  <h2 className="font-mono text-sm font-normal text-mute">
+                    <span className="text-teal mr-1.5">//</span>acervo
+                    <span className="ml-2 text-xs text-dim">({itens.length} itens)</span>
+                  </h2>
+                  {!carregando && apiOk && itens.length === 0 && (
+                    <button
+                      onClick={importarAcervoInicial}
+                      disabled={salvando}
+                      className="font-mono text-xs px-3.5 py-1.5 rounded-full bg-teal/10 border border-teal/30 text-teal-light hover:bg-teal/20 transition disabled:opacity-40"
+                    >
+                      importar acervo inicial
+                    </button>
+                  )}
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {porRecencia.map((item) => {
+                    const estaEditando = editandoId === item.id;
+                    return (
+                      <div
+                        key={item.id}
+                        className={`flex items-center justify-between gap-3 p-3 rounded-2xl border backdrop-blur-xl transition ${
+                          estaEditando
+                            ? 'bg-[#f0a63a]/10 border-[#f0a63a]/50'
+                            : 'bg-[#0c1616]/60 border-white/[0.08] hover:border-white/20'
+                        }`}
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <img
+                            src={item.capa}
+                            alt=""
+                            className="w-10 h-[60px] object-cover rounded-lg bg-white/5 flex-none"
+                          />
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-ink truncate">{item.titulo}</div>
+                            <div className="font-mono text-[10px] text-dim mt-0.5 flex items-center gap-1.5">
+                              <span>{item.tipo === 'jogo' ? '🎮 jogo' : '🍿 filme'}</span>
+                              <span>·</span>
+                              <span className={estiloTier[item.tier].bg.split(' ').find((c) => c.startsWith('text-'))}>
+                                tier {item.tier}
+                              </span>
+                              <span>·</span>
+                              <span>{item.data}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-1 flex-none font-mono text-[11px]">
+                          <button
+                            type="button"
+                            onClick={() => handleIniciarEdicao(item)}
+                            className="text-teal-light hover:bg-teal/15 px-2.5 py-1.5 rounded-lg transition"
+                          >
+                            editar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoverItem(item)}
+                            className="text-[#ff9087] hover:bg-[#f2665a]/15 px-2.5 py-1.5 rounded-lg transition"
+                          >
+                            excluir
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+
+              <p className="font-mono text-[11px] text-dim">
+                <span className="text-teal/60 mr-1.5">#</span>
+                {apiOk
+                  ? 'as alterações vão direto pro banco e aparecem no site em até ~15s'
+                  : 'API indisponível: rodando sem servidor (use vercel dev); nada será salvo'}
+              </p>
+            </main>
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="relative min-h-screen bg-bg text-ink font-sans selection:bg-teal selection:text-bg">
@@ -678,21 +1370,7 @@ export default function App() {
             <b className="text-ink font-normal tabular-nums">{horario.hora}</b>
           </div>
 
-          <button
-            onClick={() => setPainelAberto(true)}
-            className="font-mono text-xs px-3.5 py-2 rounded-full bg-white/[0.03] border border-white/[0.08] text-mute hover:text-ink hover:border-teal/40 transition"
-          >
-            <span className="text-teal mr-1">//</span>admin
-          </button>
-
-          <a
-            href="https://twitch.tv/pvzra"
-            target="_blank"
-            rel="noreferrer"
-            className="font-mono text-xs font-medium px-4 py-2 rounded-full bg-teal/10 border border-teal/30 text-teal-light hover:bg-teal hover:text-[#03201a] transition-all"
-          >
-            ● ao vivo
-          </a>
+          <BotaoAoVivo />
         </div>
       </nav>
 
@@ -762,7 +1440,7 @@ export default function App() {
             linhas={
               abaCodigo === 'acervo.py'
                 ? [
-                    [['f', 'acervo'], ['p', ' = '], ['k', 'CentralZ'], ['p', '(']],
+                    [['f', 'acervo'], ['p', ' = '], ['k', 'Central-Z'], ['p', '(']],
                     [['p', '  canal='], ['s', '"@pvzra"'], ['p', ',']],
                     [['p', '  jogos_zerados='], ['n', String(totalJogos)], ['p', ',']],
                     [['p', '  filmes_vistos='], ['n', String(totalFilmes)], ['p', ',']],
@@ -774,7 +1452,7 @@ export default function App() {
                     [['k', 'VALUES'], ['p', ' ('], ['s', "'filme_ou_react'"], ['p', ', '], ['k', 'TRUE'], ['p', ');']],
                     [],
                     [['c', '-- quer indicar algo pra próxima live?']],
-                    [['c', '-- manda lá no chat ou no Discord!']],
+                    [['c', '-- manda em "sugerir()" abaixo!']],
                   ]
             }
           />
@@ -786,6 +1464,7 @@ export default function App() {
         <SecaoAcervo
           titulo="atividade recente"
           itens={atividadeRecente}
+          carregando={carregando}
           vazio="Nenhuma atividade registrada ainda."
           extra={
             <div className="flex gap-2 font-mono text-xs">
@@ -801,6 +1480,12 @@ export default function App() {
               >
                 cine_z
               </a>
+              <a
+                href="#sugerir"
+                className="px-3.5 py-1.5 rounded-full border bg-teal/10 border-teal/30 text-teal-light hover:bg-teal/20 transition-all"
+              >
+                sugerir()
+              </a>
             </div>
           }
         />
@@ -808,318 +1493,18 @@ export default function App() {
           id="jogos"
           titulo="jogos_zerados"
           itens={jogos}
+          carregando={carregando}
           vazio="Nenhum jogo zerado em live ainda."
         />
         <SecaoAcervo
           id="filmes"
           titulo="cine_z"
           itens={filmes}
+          carregando={carregando}
           vazio="Nenhum filme assistido em live ainda."
         />
+        <SecaoSugestoes />
       </main>
-
-      {/* Gaveta Lateral do Painel Admin */}
-      <AnimatePresence>
-        {painelAberto && (
-          <>
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setPainelAberto(false)}
-              className="fixed inset-0 z-40 bg-black/70 backdrop-blur-sm"
-            />
-
-            <motion.aside
-              ref={painelRef}
-              initial={{ x: '100%' }}
-              animate={{ x: 0 }}
-              exit={{ x: '100%' }}
-              transition={{ type: 'spring', damping: 26, stiffness: 240 }}
-              className="fixed right-0 top-0 bottom-0 z-50 w-full max-w-md bg-[#081010] border-l border-white/[0.08] p-6 overflow-y-auto shadow-2xl flex flex-col justify-between"
-            >
-              <div>
-                <div className="flex items-center justify-between border-b border-white/[0.08] pb-4 mb-6">
-                  <div className="font-mono text-sm text-ink flex items-center gap-2">
-                    <span className="w-2 h-2 rounded-full bg-teal shadow-[0_0_8px_#0dbb95]" />
-                    <span>painel_admin.sh</span>
-                  </div>
-                  <button
-                    onClick={() => setPainelAberto(false)}
-                    className="font-mono text-xs text-mute hover:text-ink px-2 py-1 rounded bg-white/[0.04]"
-                  >
-                    [ESC]
-                  </button>
-                </div>
-
-                {!autenticado ? (
-                  <form onSubmit={handleLogin} className="space-y-4">
-                    <p className="font-mono text-xs text-mute leading-relaxed">
-                      <span className="text-teal">$</span> Digite a chave de
-                      acesso para liberar o gerenciamento do catálogo (senha
-                      padrão: <b className="text-teal-light">pvzra</b>):
-                    </p>
-                    <div>
-                      <input
-                        type="password"
-                        value={senhaInput}
-                        onChange={(e) => setSenhaInput(e.target.value)}
-                        placeholder="Senha do admin..."
-                        className="w-full px-3.5 py-2.5 rounded-xl bg-bg border border-white/10 font-mono text-sm text-ink focus:outline-none focus:border-teal"
-                        autoFocus
-                      />
-                      {erroSenha && (
-                        <p className="font-mono text-xs text-[#ff9087] mt-2">
-                          → erro: senha incorreta.
-                        </p>
-                      )}
-                    </div>
-                    <button
-                      type="submit"
-                      className="w-full py-2.5 rounded-xl bg-teal text-[#03201a] font-mono text-xs font-bold uppercase tracking-wider hover:bg-teal-light transition"
-                    >
-                      Autenticar
-                    </button>
-                  </form>
-                ) : (
-                  <div className="space-y-6">
-                    <form onSubmit={handleSalvarItem} className="space-y-3.5">
-                      <div className="flex items-center justify-between">
-                        <span className="font-mono text-xs text-teal-light uppercase tracking-wider">
-                          {editandoId !== null
-                            ? '// Editando Item'
-                            : '// Adicionar Pôster'}
-                        </span>
-                        {editandoId !== null && (
-                          <button
-                            type="button"
-                            onClick={limparFormulario}
-                            className="font-mono text-[11px] text-[#ffc773] hover:underline"
-                          >
-                            cancelar edição
-                          </button>
-                        )}
-                      </div>
-
-                      <div>
-                        <label className="block font-mono text-[11px] text-mute mb-1">
-                          Título da Obra *
-                        </label>
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            required
-                            value={novoTitulo}
-                            onChange={(e) => setNovoTitulo(e.target.value)}
-                            placeholder="Ex: Resident Evil 4"
-                            className="flex-1 px-3 py-2 rounded-lg bg-bg border border-white/10 text-sm text-ink focus:outline-none focus:border-teal"
-                          />
-                          <button
-                            type="button"
-                            onClick={buscarCapaAutomatica}
-                            disabled={buscandoCapa || !novoTitulo.trim()}
-                            className="px-3 py-2 rounded-lg bg-white/[0.04] border border-white/[0.08] text-teal-light font-mono text-xs hover:bg-teal/10 hover:border-teal/30 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
-                          >
-                            {buscandoCapa ? 'Buscando...' : '🔍 Buscar'}
-                          </button>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="block font-mono text-[11px] text-mute mb-1">
-                            Categoria
-                          </label>
-                          <select
-                            value={novoTipo}
-                            onChange={(e) =>
-                              setNovoTipo(e.target.value as 'jogo' | 'filme')
-                            }
-                            className="w-full px-3 py-2 rounded-lg bg-bg border border-white/10 font-mono text-xs text-ink focus:outline-none focus:border-teal"
-                          >
-                            <option value="filme">🍿 Filme</option>
-                            <option value="jogo">🎮 Jogo</option>
-                          </select>
-                        </div>
-
-                        <div>
-                          <label className="block font-mono text-[11px] text-mute mb-1">
-                            Nota (Tier)
-                          </label>
-                          <select
-                            value={novoTier}
-                            onChange={(e) =>
-                              setNovoTier(
-                                e.target.value as 'S' | 'A' | 'B' | 'C'
-                              )
-                            }
-                            className="w-full px-3 py-2 rounded-lg bg-bg border border-white/10 font-mono text-xs text-ink focus:outline-none focus:border-teal"
-                          >
-                            <option value="S">Tier S (Verde)</option>
-                            <option value="A">Tier A (Âmbar)</option>
-                            <option value="B">Tier B (Azul)</option>
-                            <option value="C">Tier C (Coral)</option>
-                          </select>
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="block font-mono text-[11px] text-mute mb-1">
-                            Status / Tag
-                          </label>
-                          <input
-                            type="text"
-                            value={novoStatus}
-                            onChange={(e) => setNovoStatus(e.target.value)}
-                            placeholder="Ex: Zerado em Live"
-                            className="w-full px-3 py-2 rounded-lg bg-bg border border-white/10 font-mono text-xs text-ink focus:outline-none focus:border-teal"
-                          />
-                        </div>
-                        <div>
-                          <label className="block font-mono text-[11px] text-mute mb-1">
-                            Data (Mês/Ano)
-                          </label>
-                          <input
-                            type="text"
-                            value={novaData}
-                            onChange={(e) => setNovaData(e.target.value)}
-                            placeholder="Ex: nov 2026"
-                            className="w-full px-3 py-2 rounded-lg bg-bg border border-white/10 font-mono text-xs text-ink focus:outline-none focus:border-teal"
-                          />
-                        </div>
-                      </div>
-
-                      <div>
-                        <label className="block font-mono text-[11px] text-mute mb-1">
-                          Link do Pôster Vertical (URL)
-                        </label>
-                        <input
-                          type="url"
-                          value={novaCapa}
-                          onChange={(e) => setNovaCapa(e.target.value)}
-                          placeholder="https://..."
-                          className="w-full px-3 py-2 rounded-lg bg-bg border border-white/10 font-mono text-xs text-ink focus:outline-none focus:border-teal"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block font-mono text-[11px] text-mute mb-1">
-                          Comentário Rápido
-                        </label>
-                        <textarea
-                          rows={2}
-                          value={novoComentario}
-                          onChange={(e) => setNovoComentario(e.target.value)}
-                          placeholder="O que achou da experiência em live?"
-                          className="w-full px-3 py-2 rounded-lg bg-bg border border-white/10 text-sm text-ink focus:outline-none focus:border-teal resize-none"
-                        />
-                      </div>
-
-                      <div className="flex gap-2">
-                        <button
-                          type="submit"
-                          className={`flex-1 py-2.5 rounded-xl font-mono text-xs font-bold uppercase tracking-wider transition ${
-                            editandoId !== null
-                              ? 'bg-[#f0a63a] text-[#2a1a02] hover:bg-[#ffc773] shadow-[0_0_20px_rgba(240,166,58,0.3)]'
-                              : 'bg-teal text-[#03201a] hover:bg-teal-light shadow-[0_0_20px_rgba(13,187,149,0.3)]'
-                          }`}
-                        >
-                          {editandoId !== null
-                            ? '✓ Salvar Alterações'
-                            : '+ Salvar no Catálogo'}
-                        </button>
-                      </div>
-                    </form>
-
-                    {/* Lista de Itens Cadastrados */}
-                    <div className="border-t border-white/[0.08] pt-5">
-                      <div className="flex items-center justify-between mb-3">
-                        <span className="font-mono text-xs text-mute">
-                          // Itens Cadastrados ({itens.length})
-                        </span>
-                        <button
-                          onClick={() => {
-                            limparFormulario();
-                            setItens(acervoInicial);
-                          }}
-                          className="font-mono text-[10px] text-dim hover:text-teal-light underline"
-                        >
-                          resetar padrão
-                        </button>
-                      </div>
-
-                      <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                        {itens.map((item) => {
-                          const estaEditando = editandoId === item.id;
-                          return (
-                            <div
-                              key={item.id}
-                              className={`flex items-center justify-between gap-2.5 p-2 rounded-xl border transition ${
-                                estaEditando
-                                  ? 'bg-teal/10 border-teal/50'
-                                  : 'bg-bg border-white/[0.06]'
-                              }`}
-                            >
-                              <div className="flex items-center gap-2.5 min-w-0">
-                                <img
-                                  src={item.capa}
-                                  alt={item.titulo}
-                                  className="w-8 h-11 object-cover rounded bg-white/5 flex-none"
-                                />
-                                <div className="truncate">
-                                  <div className="text-xs font-semibold text-ink truncate">
-                                    {item.titulo}
-                                  </div>
-                                  <div className="font-mono text-[10px] text-dim">
-                                    {item.tipo.toUpperCase()} · TIER {item.tier}
-                                  </div>
-                                </div>
-                              </div>
-
-                              <div className="flex items-center gap-1 flex-none">
-                                <button
-                                  type="button"
-                                  onClick={() => handleIniciarEdicao(item)}
-                                  className="font-mono text-[11px] text-teal-light hover:bg-teal/15 px-2 py-1 rounded border border-transparent hover:border-teal/30 transition"
-                                >
-                                  editar
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemoverItem(item.id)}
-                                  className="font-mono text-[11px] text-[#ff9087] hover:bg-[#f2665a]/15 px-2 py-1 rounded border border-transparent hover:border-[#f2665a]/30 transition"
-                                >
-                                  excluir
-                                </button>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="border-t border-white/[0.08] pt-4 mt-6 flex items-center justify-between font-mono text-[11px] text-dim">
-                <span>storage: local_browser</span>
-                {autenticado && (
-                  <button
-                    onClick={() => {
-                      limparFormulario();
-                      setAutenticado(false);
-                    }}
-                    className="text-mute hover:text-ink underline"
-                  >
-                    trancar painel
-                  </button>
-                )}
-              </div>
-            </motion.aside>
-          </>
-        )}
-      </AnimatePresence>
 
       {/* Rodapé */}
       <footer className="relative z-10 max-w-6xl mx-auto px-6 py-8 border-t border-white/[0.08] flex flex-wrap items-center justify-between gap-4 font-mono text-xs text-mute">
