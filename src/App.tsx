@@ -802,7 +802,7 @@ export default function App() {
     setNovoTitulo('');
     setNovoTipo('filme');
     setNovoTier('S');
-    setNovoStatus('Assistido em Live');
+    setNovoStatus('Cine-Z');
     setNovaData('nov 2026');
     setNovaCapa('');
     setNovoComentario('');
