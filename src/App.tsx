@@ -12,6 +12,380 @@ interface ItemAcervo {
   capa: string;
 }
 
+// Logo com efeito de digitação (igual à vinheta de transição)
+const LOGO_LETRAS = ['p', 'v', 'z', 'r', 'a'];
+const LOGO_TOTAL = LOGO_LETRAS.length + 1; // + o ponto
+const DIGITA_MS = 110; // tempo por caractere ao digitar
+const APAGA_MS = 45; // tempo por caractere ao apagar
+const CURSOR_FINAL_MS = 2200; // cursor piscando depois de terminar
+const REPETE_MS = 20000; // intervalo entre uma digitação e outra
+
+function LogoDigitando() {
+  const [visiveis, setVisiveis] = useState(0);
+  const [cursor, setCursor] = useState<'digitando' | 'piscando' | 'oculto'>(
+    'piscando'
+  );
+
+  useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      setVisiveis(LOGO_TOTAL);
+      setCursor('oculto');
+      return;
+    }
+
+    const timers: number[] = [];
+    const agenda = (fn: () => void, ms: number) =>
+      timers.push(window.setTimeout(fn, ms));
+
+    const digitar = (n: number) => {
+      setCursor('digitando');
+      setVisiveis(n);
+      if (n < LOGO_TOTAL) {
+        agenda(() => digitar(n + 1), DIGITA_MS);
+      } else {
+        setCursor('piscando');
+        agenda(() => setCursor('oculto'), CURSOR_FINAL_MS);
+        agenda(() => apagar(LOGO_TOTAL), REPETE_MS);
+      }
+    };
+
+    const apagar = (n: number) => {
+      setCursor('digitando');
+      setVisiveis(n);
+      if (n > 0) agenda(() => apagar(n - 1), APAGA_MS);
+      else agenda(() => digitar(1), 500);
+    };
+
+    // começa com o cursor piscando sozinho, como na vinheta
+    agenda(() => digitar(1), 700);
+    return () => timers.forEach(clearTimeout);
+  }, []);
+
+  const cursorEl = (
+    <span className="relative inline-block w-0" aria-hidden="true">
+      <span
+        className={`absolute left-[0.04em] bottom-[-0.08em] w-[0.06em] h-[0.95em] bg-teal shadow-[0_0_8px_#0dbb95] ${
+          cursor === 'piscando' ? 'logo-cursor-pisca' : ''
+        } ${cursor === 'oculto' ? 'opacity-0' : ''}`}
+      />
+    </span>
+  );
+
+  return (
+    <div
+      className="font-bold text-6xl tracking-[-0.03em] leading-none"
+      role="img"
+      aria-label="pvzra."
+    >
+      <span aria-hidden="true">
+        {LOGO_LETRAS.map((l, i) => (
+          <React.Fragment key={i}>
+            {visiveis === i && cursorEl}
+            <span
+              className={`${l === 'z' ? 'text-teal' : ''} ${
+                i < visiveis ? '' : 'invisible'
+              }`}
+            >
+              {l}
+            </span>
+          </React.Fragment>
+        ))}
+        {visiveis === LOGO_LETRAS.length && cursorEl}
+        <span
+          className={`inline-block w-[0.2em] h-[0.2em] ml-[0.05em] bg-teal ${
+            visiveis >= LOGO_TOTAL ? '' : 'invisible'
+          }`}
+        />
+        {visiveis >= LOGO_TOTAL && cursorEl}
+      </span>
+    </div>
+  );
+}
+
+const prefereMenosMovimento = () =>
+  window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// ---------- Editor de código que se digita ----------
+type Token = [keyof typeof corToken, string];
+const corToken = {
+  f: 'text-ink',
+  p: 'text-[#c4d0cd]',
+  k: 'text-teal-light',
+  s: 'text-[#ffc773]',
+  n: 'text-[#8fb8ff]',
+  c: 'text-dim',
+};
+let editorJaDigitou = false; // 1ª digitação espera a logo; trocas de aba são imediatas
+
+function EditorCodigo({ linhas }: { linhas: Token[][] }) {
+  // cada caractere é um passo; cada quebra de linha também
+  const total = linhas.reduce(
+    (soma, l, i) =>
+      soma + l.reduce((a, [, t]) => a + t.length, 0) + (i < linhas.length - 1 ? 1 : 0),
+    0
+  );
+  const [passo, setPasso] = useState(0);
+  const [pronto, setPronto] = useState(false);
+
+  useEffect(() => {
+    if (prefereMenosMovimento()) {
+      setPronto(true);
+      return;
+    }
+    const primeira = !editorJaDigitou;
+    editorJaDigitou = true;
+    const posQuebras = new Set<number>();
+    let acc = 0;
+    linhas.forEach((l, i) => {
+      acc += l.reduce((a, [, t]) => a + t.length, 0);
+      if (i < linhas.length - 1) posQuebras.add(acc++);
+    });
+
+    let i = 0;
+    let timer = 0;
+    const avanca = () => {
+      i++;
+      setPasso(i);
+      if (i >= total) return setPronto(true);
+      const pausa = posQuebras.has(i) ? 140 : (primeira ? 24 : 14) + Math.random() * 22;
+      timer = window.setTimeout(avanca, pausa);
+    };
+    timer = window.setTimeout(avanca, primeira ? 1400 : 120);
+    return () => clearTimeout(timer);
+    // a aba é trocada via `key`, então basta rodar na montagem
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const n = pronto ? Infinity : passo;
+  const cursor = (
+    <span className="relative inline-block w-0 align-baseline" aria-hidden="true">
+      <span
+        className={`absolute left-px bottom-[-0.2em] w-[2px] h-[1.15em] bg-teal-light shadow-[0_0_8px_rgba(70,227,190,0.6)] ${
+          pronto || passo === 0 ? 'logo-cursor-pisca' : ''
+        }`}
+      />
+    </span>
+  );
+  const ultimo = pronto ? total : passo;
+
+  let pos = 0;
+  return (
+    <div className="p-4 leading-relaxed select-none" aria-label="código ilustrativo">
+      <div className="space-y-1">
+        {linhas.map((linha, li) => {
+          const inicioLinha = pos;
+          const partes = linha.map(([cls, txt], ti) => {
+            const ini = pos;
+            pos += txt.length;
+            const vis = Math.max(0, Math.min(txt.length, n - ini));
+            const temCursor = ultimo >= ini && ultimo < ini + txt.length;
+            return (
+              <span key={ti} className={corToken[cls]}>
+                {txt.slice(0, vis)}
+                {temCursor && cursor}
+                <span className="invisible">{txt.slice(vis)}</span>
+              </span>
+            );
+          });
+          const fimLinha = pos;
+          if (li < linhas.length - 1) pos++; // a quebra de linha
+          const cursorNoFim = ultimo === fimLinha;
+          return (
+            <div key={li} className="whitespace-pre min-h-[1.25em]">
+              <span className={`text-white/20 mr-4 ${n >= inicioLinha ? '' : 'invisible'}`}>
+                {li + 1}
+              </span>
+              {partes}
+              {cursorNoFim && cursor}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ---------- Fundo: grade em camadas, luz passeando e pulsos nas linhas ----------
+const GRADE = 96; // espaçamento da grade maior (px)
+
+function FundoGrade() {
+  const movRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (prefereMenosMovimento()) return;
+    const mov = movRef.current;
+    if (!mov) return;
+    let timer = 0;
+    let ativos = 0;
+
+    const dispara = () => {
+      timer = window.setTimeout(dispara, 2600 + Math.random() * 3200);
+      if (ativos >= 3 || document.hidden) return;
+      // a camada tem 2× a tela; a parte visível fica mais ou menos no miolo
+      const W = mov.offsetWidth;
+      const H = mov.offsetHeight;
+      const horizontal = Math.random() < 0.5;
+      const sentido = Math.random() < 0.5 ? 1 : -1;
+      const tam = 160 + Math.random() * 140;
+      const faixa = horizontal ? H : W;
+      const linha = Math.round((faixa * (0.32 + Math.random() * 0.36)) / GRADE) * GRADE;
+      const de = (horizontal ? W : H) * 0.18;
+      const ate = (horizontal ? W : H) * 0.82;
+      const [a, b] = sentido > 0 ? [de - tam, ate] : [ate, de - tam];
+
+      const el = document.createElement('i');
+      el.className = `pulso-grade ${horizontal ? 'h' : 'v'}${sentido < 0 ? ' rev' : ''}`;
+      el.style.setProperty(horizontal ? 'top' : 'left', `${linha}px`);
+      el.style.setProperty(horizontal ? 'width' : 'height', `${tam}px`);
+      mov.appendChild(el);
+      ativos++;
+
+      const eixo = horizontal ? 'translateX' : 'translateY';
+      const anim = el.animate(
+        [
+          { transform: `${eixo}(${a}px)`, opacity: 0 },
+          { opacity: 1, offset: 0.12 },
+          { opacity: 1, offset: 0.85 },
+          { transform: `${eixo}(${b}px)`, opacity: 0 },
+        ],
+        { duration: (Math.abs(b - a) / (0.35 + Math.random() * 0.25)), easing: 'linear' }
+      );
+      anim.onfinish = () => {
+        el.remove();
+        ativos--;
+      };
+    };
+
+    timer = window.setTimeout(dispara, 1200);
+    return () => {
+      clearTimeout(timer);
+      mov.querySelectorAll('.pulso-grade').forEach((e) => e.remove());
+    };
+  }, []);
+
+  return (
+    <div className="fixed inset-0 overflow-hidden pointer-events-none grade-mascara">
+      <div className="grade-rot">
+        <div ref={movRef} className="grade-mov">
+          <div className="absolute inset-0 grade-fina" />
+          <div className="absolute inset-0 grade-maior" />
+          <div className="absolute inset-0 grade-acesa" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------- Catálogo ----------
+const MESES = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+
+// "out 2026" -> número comparável (ano * 12 + mês); datas fora do padrão vão pro fim
+function valorData(data: string) {
+  const [mes, ano] = data.trim().toLowerCase().split(/\s+/);
+  const m = MESES.indexOf(mes?.slice(0, 3) ?? '');
+  const a = Number(ano);
+  if (m < 0 || !Number.isFinite(a)) return -1;
+  return a * 12 + m;
+}
+
+function CartaoPoster({ item }: { item: ItemAcervo }) {
+  const tier = estiloTier[item.tier];
+  return (
+    <motion.article
+      layout
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.95 }}
+      transition={{ duration: 0.25 }}
+      whileHover={{ y: -6 }}
+      className="rounded-[20px] overflow-hidden bg-[#0c1616]/60 border border-white/[0.08] backdrop-blur-xl shadow-[0_20px_50px_rgba(0,0,0,0.45)] hover:border-teal/40 transition-colors group flex flex-col"
+    >
+      <div className="relative aspect-[2/3] w-full overflow-hidden bg-[#05090a]">
+        <img
+          src={item.capa}
+          alt={item.titulo}
+          className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
+        />
+        <div className="absolute inset-0 bg-gradient-to-t from-[#05090a] via-[#05090a]/20 to-transparent opacity-90" />
+
+        <span
+          className={`absolute top-3 right-3 font-mono text-[11px] font-medium px-2.5 py-1 rounded-full border backdrop-blur-md flex items-center gap-1.5 ${tier.bg}`}
+        >
+          <i className={`w-1.5 h-1.5 rounded-full ${tier.dot}`} />
+          TIER {item.tier}
+        </span>
+
+        <span className="absolute bottom-3 left-3 right-3 font-mono text-[10px] text-[#d3ebe5] bg-[#05090a]/85 border border-white/10 backdrop-blur-md px-2.5 py-1 rounded-md truncate w-fit max-w-[90%]">
+          {item.status}
+        </span>
+      </div>
+
+      <div className="p-4 flex-1 flex flex-col justify-between">
+        <div>
+          <div className="flex items-center justify-between gap-1 mb-1">
+            <span className="font-mono text-[10px] text-dim uppercase">
+              {item.tipo === 'jogo' ? '🎮 Jogo' : '🍿 Filme'}
+            </span>
+            <span className="font-mono text-[10px] text-dim">
+              {item.data}
+            </span>
+          </div>
+          <h3 className="font-bold text-base tracking-[-0.02em] text-ink group-hover:text-teal-light transition-colors leading-snug">
+            {item.titulo}
+          </h3>
+          <p className="mt-1.5 text-mute font-light text-xs leading-relaxed line-clamp-3">
+            {item.comentario}
+          </p>
+        </div>
+      </div>
+    </motion.article>
+  );
+}
+
+function SecaoAcervo({
+  id,
+  titulo,
+  itens,
+  vazio,
+  extra,
+}: {
+  id?: string;
+  titulo: string;
+  itens: ItemAcervo[];
+  vazio: string;
+  extra?: React.ReactNode;
+}) {
+  return (
+    <section id={id} className="scroll-mt-8">
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/[0.08] pb-4 mb-8">
+        <h2 className="font-mono text-sm font-normal text-mute">
+          <span className="text-teal mr-1.5">//</span>
+          {titulo}
+          <span className="ml-2 text-xs text-dim">
+            ({itens.length} {itens.length === 1 ? 'item' : 'itens'})
+          </span>
+        </h2>
+        {extra}
+      </div>
+
+      {itens.length === 0 ? (
+        <p className="font-mono text-xs text-dim">
+          <span className="text-teal/60 mr-1.5">#</span>
+          {vazio}
+        </p>
+      ) : (
+        <motion.div layout className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-5">
+          <AnimatePresence>
+            {itens.map((item) => (
+              <CartaoPoster key={item.id} item={item} />
+            ))}
+          </AnimatePresence>
+        </motion.div>
+      )}
+    </section>
+  );
+}
+
 const acervoInicial: ItemAcervo[] = [
   {
     id: 1,
@@ -28,7 +402,7 @@ const acervoInicial: ItemAcervo[] = [
     titulo: 'Hell House LLC',
     tipo: 'filme',
     tier: 'A',
-    status: 'Cine Live // Terror',
+    status: 'Cine-Z // Terror',
     data: 'ago 2025',
     comentario: 'Found footage tenso demais, rendeu bons sustos no chat.',
     capa: 'https://images.unsplash.com/photo-1509198397868-475647b2a1e5?auto=format&fit=crop&w=600&h=900&q=80',
@@ -48,7 +422,7 @@ const acervoInicial: ItemAcervo[] = [
     titulo: 'Paranormal Activity: Next of Kin',
     tipo: 'filme',
     tier: 'B',
-    status: 'Cine Live // Terror',
+    status: 'Cine-Z // Terror',
     data: 'jul 2025',
     comentario: 'Ambientação boa na fazenda isolada, valeu a madrugada com a galera.',
     capa: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?auto=format&fit=crop&w=600&h=900&q=80',
@@ -84,7 +458,6 @@ export default function App() {
     }
   });
 
-  const [filtro, setFiltro] = useState<'todos' | 'jogo' | 'filme'>('todos');
   const [abaCodigo, setAbaCodigo] = useState<'acervo.py' | 'chat.sql'>('acervo.py');
   const [horario, setHorario] = useState({ data: '', hora: '' });
 
@@ -270,8 +643,12 @@ export default function App() {
     setItens(itens.filter((item) => item.id !== id));
   };
 
-  const itensFiltrados =
-    filtro === 'todos' ? itens : itens.filter((item) => item.tipo === filtro);
+  const porRecencia = [...itens].sort(
+    (a, b) => valorData(b.data) - valorData(a.data) || b.id - a.id
+  );
+  const atividadeRecente = porRecencia.slice(0, 4);
+  const jogos = porRecencia.filter((i) => i.tipo === 'jogo');
+  const filmes = porRecencia.filter((i) => i.tipo === 'filme');
 
   const totalJogos = itens.filter((i) => i.tipo === 'jogo').length;
   const totalFilmes = itens.filter((i) => i.tipo === 'filme').length;
@@ -280,17 +657,13 @@ export default function App() {
     <div className="relative min-h-screen bg-bg text-ink font-sans selection:bg-teal selection:text-bg">
       {/* Background do Overlay */}
       <div className="fixed inset-0 bg-wash pointer-events-none" />
-      <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute inset-0 bg-grid" />
-      </div>
+      <FundoGrade />
 
       {/* Topo / Brand */}
       <nav className="relative z-10 max-w-6xl mx-auto px-6 pt-8 pb-4 flex items-center justify-between">
         <div className="flex items-center gap-4">
           <div>
-            <div className="font-bold text-4xl tracking-[-0.03em] leading-none">
-              pv<span className="text-teal">z</span>ra
-            </div>
+            <LogoDigitando />
             <div className="font-mono text-sm text-mute mt-1.5 tracking-tight">
               entretenimento ao vivo
             </div>
@@ -330,15 +703,15 @@ export default function App() {
             <span className="w-5 h-5 rounded-full bg-teal grid place-items-center shadow-[0_0_14px_rgba(13,187,149,0.6)]">
               <span className="w-1.5 h-1.5 rounded-full bg-[#03201a] animate-pulse" />
             </span>
-            Hub oficial & memória da live
+            Hub oficial da comunidade do PVZRA!
           </div>
 
           <h1 className="leading-none">
             <span className="block font-extralight text-4xl sm:text-5xl tracking-[-0.035em] text-ink/90 mb-1">
-              O arquivo da
+              O arquivo das
             </span>
             <span className="block font-extrabold text-6xl sm:text-7xl tracking-[-0.055em] text-ink">
-              nossa live.
+              nossas lives.
             </span>
           </h1>
 
@@ -347,7 +720,7 @@ export default function App() {
           </div>
 
           <p className="mt-6 text-mute font-light text-base sm:text-lg max-w-xl leading-relaxed">
-            Todos os jogos que zeramos em campanha e os filmes que sobreviveram ao nosso react na madrugada.
+            Histórico com todos os jogos que zeramos<br />e os filmes que assistimos durante as lives.
           </p>
         </div>
 
@@ -384,179 +757,65 @@ export default function App() {
             </span>
           </div>
 
-          <div className="p-4 leading-relaxed select-none">
-            {abaCodigo === 'acervo.py' ? (
-              <div className="space-y-1">
-                <div>
-                  <span className="text-white/20 mr-4">1</span>
-                  <span className="text-ink">acervo</span>{' '}
-                  <span className="text-[#c4d0cd]">=</span>{' '}
-                  <span className="text-teal-light">StreamHub</span>
-                  <span className="text-[#c4d0cd]">(</span>
-                </div>
-                <div>
-                  <span className="text-white/20 mr-4">2</span>{' '}
-                  <span className="text-[#c4d0cd]">canal=</span>
-                  <span className="text-[#ffc773]">"@pvzra"</span>
-                  <span className="text-[#c4d0cd]">,</span>
-                </div>
-                <div>
-                  <span className="text-white/20 mr-4">3</span>{' '}
-                  <span className="text-[#c4d0cd]">jogos_zerados=</span>
-                  <span className="text-[#8fb8ff]">{totalJogos}</span>
-                  <span className="text-[#c4d0cd]">,</span>
-                </div>
-                <div>
-                  <span className="text-white/20 mr-4">4</span>{' '}
-                  <span className="text-[#c4d0cd]">filmes_vistos=</span>
-                  <span className="text-[#8fb8ff]">{totalFilmes}</span>
-                  <span className="text-[#c4d0cd]">,</span>
-                </div>
-                <div>
-                  <span className="text-white/20 mr-4">5</span>
-                  <span className="text-[#c4d0cd]">)</span>
-                </div>
-                <div>
-                  <span className="text-white/20 mr-4">6</span>
-                  <span className="text-ink">acervo</span>
-                  <span className="text-[#c4d0cd]">.</span>
-                  <span className="text-[#8fb8ff]">render</span>
-                  <span className="text-[#c4d0cd]">()</span>{' '}
-                  <span className="text-dim"># formato poster 2:3</span>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-1">
-                <div>
-                  <span className="text-white/20 mr-4">1</span>
-                  <span className="text-teal-light">INSERT INTO</span>{' '}
-                  <span className="text-[#c4d0cd]">sugestoes_live</span>
-                </div>
-                <div>
-                  <span className="text-white/20 mr-4">2</span>
-                  <span className="text-teal-light">VALUES</span>{' '}
-                  <span className="text-[#c4d0cd]">(</span>
-                  <span className="text-[#ffc773]">'filme_ou_react'</span>
-                  <span className="text-[#c4d0cd]">,</span>{' '}
-                  <span className="text-teal-light">TRUE</span>
-                  <span className="text-[#c4d0cd]">);</span>
-                </div>
-                <div>
-                  <span className="text-white/20 mr-4">3</span>
-                </div>
-                <div>
-                  <span className="text-white/20 mr-4">4</span>
-                  <span className="text-dim">
-                    -- quer indicar algo pra próxima live?
-                  </span>
-                </div>
-                <div>
-                  <span className="text-white/20 mr-4">5</span>
-                  <span className="text-dim">
-                    -- manda lá no chat ou no Discord!
-                  </span>
-                </div>
-              </div>
-            )}
-          </div>
+          <EditorCodigo
+            key={abaCodigo}
+            linhas={
+              abaCodigo === 'acervo.py'
+                ? [
+                    [['f', 'acervo'], ['p', ' = '], ['k', 'CentralZ'], ['p', '(']],
+                    [['p', '  canal='], ['s', '"@pvzra"'], ['p', ',']],
+                    [['p', '  jogos_zerados='], ['n', String(totalJogos)], ['p', ',']],
+                    [['p', '  filmes_vistos='], ['n', String(totalFilmes)], ['p', ',']],
+                    [['p', ')']],
+                    [['f', 'acervo'], ['p', '.'], ['n', 'render'], ['p', '()'], ['c', ' # formato poster 2:3']],
+                  ]
+                : [
+                    [['k', 'INSERT INTO'], ['p', ' sugestoes_live']],
+                    [['k', 'VALUES'], ['p', ' ('], ['s', "'filme_ou_react'"], ['p', ', '], ['k', 'TRUE'], ['p', ');']],
+                    [],
+                    [['c', '-- quer indicar algo pra próxima live?']],
+                    [['c', '-- manda lá no chat ou no Discord!']],
+                  ]
+            }
+          />
         </div>
       </header>
 
-      {/* Catálogo & Filtros */}
-      <main className="relative z-10 max-w-6xl mx-auto px-6 pb-20">
-        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/[0.08] pb-4 mb-8">
-          <div className="font-mono text-sm text-mute">
-            <span className="text-teal mr-1.5">//</span>histórico da live
-            <span className="ml-2 text-xs text-dim">
-              ({itensFiltrados.length} itens)
-            </span>
-          </div>
-
-          <div className="flex gap-2 font-mono text-xs">
-            {(
-              [
-                { id: 'todos', label: 'todos()' },
-                { id: 'jogo', label: 'jogos_zerados' },
-                { id: 'filme', label: 'cine_live' },
-              ] as const
-            ).map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setFiltro(tab.id)}
-                className={`px-3.5 py-1.5 rounded-full border transition-all ${
-                  filtro === tab.id
-                    ? 'bg-teal/15 border-teal/40 text-teal-light shadow-[0_0_20px_rgba(13,187,149,0.15)]'
-                    : 'bg-[#0c1616]/60 border-white/[0.08] text-mute hover:text-ink hover:border-white/20'
-                }`}
+      {/* Catálogo: atividade recente, depois jogos e filmes */}
+      <main className="relative z-10 max-w-6xl mx-auto px-6 pb-20 space-y-16">
+        <SecaoAcervo
+          titulo="atividade recente"
+          itens={atividadeRecente}
+          vazio="Nenhuma atividade registrada ainda."
+          extra={
+            <div className="flex gap-2 font-mono text-xs">
+              <a
+                href="#jogos"
+                className="px-3.5 py-1.5 rounded-full border bg-[#0c1616]/60 border-white/[0.08] text-mute hover:text-ink hover:border-teal/40 transition-all"
               >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Grid de Pôsteres Verticais (2:3) */}
-        <motion.div
-          layout
-          className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-5"
-        >
-          <AnimatePresence>
-            {itensFiltrados.map((item) => {
-              const tier = estiloTier[item.tier];
-              return (
-                <motion.article
-                  layout
-                  initial={{ opacity: 0, y: 16 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.95 }}
-                  transition={{ duration: 0.25 }}
-                  whileHover={{ y: -6 }}
-                  key={item.id}
-                  className="rounded-[20px] overflow-hidden bg-[#0c1616]/60 border border-white/[0.08] backdrop-blur-xl shadow-[0_20px_50px_rgba(0,0,0,0.45)] hover:border-teal/40 transition-colors group flex flex-col"
-                >
-                  <div className="relative aspect-[2/3] w-full overflow-hidden bg-[#05090a]">
-                    <img
-                      src={item.capa}
-                      alt={item.titulo}
-                      className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-[#05090a] via-[#05090a]/20 to-transparent opacity-90" />
-
-                    <span
-                      className={`absolute top-3 right-3 font-mono text-[11px] font-medium px-2.5 py-1 rounded-full border backdrop-blur-md flex items-center gap-1.5 ${tier.bg}`}
-                    >
-                      <i className={`w-1.5 h-1.5 rounded-full ${tier.dot}`} />
-                      TIER {item.tier}
-                    </span>
-
-                    <span className="absolute bottom-3 left-3 right-3 font-mono text-[10px] text-[#d3ebe5] bg-[#05090a]/85 border border-white/10 backdrop-blur-md px-2.5 py-1 rounded-md truncate w-fit max-w-[90%]">
-                      {item.status}
-                    </span>
-                  </div>
-
-                  <div className="p-4 flex-1 flex flex-col justify-between">
-                    <div>
-                      <div className="flex items-center justify-between gap-1 mb-1">
-                        <span className="font-mono text-[10px] text-dim uppercase">
-                          {item.tipo === 'jogo' ? '🎮 Jogo' : '🍿 Filme'}
-                        </span>
-                        <span className="font-mono text-[10px] text-dim">
-                          {item.data}
-                        </span>
-                      </div>
-                      <h3 className="font-bold text-base tracking-[-0.02em] text-ink group-hover:text-teal-light transition-colors leading-snug">
-                        {item.titulo}
-                      </h3>
-                      <p className="mt-1.5 text-mute font-light text-xs leading-relaxed line-clamp-3">
-                        {item.comentario}
-                      </p>
-                    </div>
-                  </div>
-                </motion.article>
-              );
-            })}
-          </AnimatePresence>
-        </motion.div>
+                jogos_zerados
+              </a>
+              <a
+                href="#filmes"
+                className="px-3.5 py-1.5 rounded-full border bg-[#0c1616]/60 border-white/[0.08] text-mute hover:text-ink hover:border-teal/40 transition-all"
+              >
+                cine_z
+              </a>
+            </div>
+          }
+        />
+        <SecaoAcervo
+          id="jogos"
+          titulo="jogos_zerados"
+          itens={jogos}
+          vazio="Nenhum jogo zerado em live ainda."
+        />
+        <SecaoAcervo
+          id="filmes"
+          titulo="cine_z"
+          itens={filmes}
+          vazio="Nenhum filme assistido em live ainda."
+        />
       </main>
 
       {/* Gaveta Lateral do Painel Admin */}
@@ -865,7 +1124,7 @@ export default function App() {
       {/* Rodapé */}
       <footer className="relative z-10 max-w-6xl mx-auto px-6 py-8 border-t border-white/[0.08] flex flex-wrap items-center justify-between gap-4 font-mono text-xs text-mute">
         <div>
-          <span className="text-teal">//</span> pvzra hub · feito pra comunidade
+          <span className="text-teal">//</span> central z · comunidade oficial do PVZRA
         </div>
         <div className="flex items-center gap-2.5">
           <svg

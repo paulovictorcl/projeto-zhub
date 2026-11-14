@@ -56,29 +56,92 @@
           ),
           linear-gradient(160deg, #0b1214 0%, #071010 45%, #050b0b 100%);
       }
-      .bg-grid {
-        background-image: linear-gradient(
-            rgba(255, 255, 255, 0.03) 1px,
-            transparent 1px
-          ),
-          linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
-        background-size: 48px 48px;
-        transform: rotate(-8deg) scale(1.25);
-        animation: gridMove 18s linear infinite;
-        mask-image: radial-gradient(
-          80% 80% at 50% 40%,
-          #000 30%,
-          transparent 90%
-        );
-        -webkit-mask-image: radial-gradient(
-          80% 80% at 50% 40%,
-          #000 30%,
-          transparent 90%
-        );
+      /* Grade em camadas (fina + maior + acesa pela luz) */
+      .grade-mascara {
+        mask-image: radial-gradient(80% 80% at 50% 40%, #000 30%, transparent 90%);
+        -webkit-mask-image: radial-gradient(80% 80% at 50% 40%, #000 30%, transparent 90%);
       }
-      @keyframes gridMove {
-        to {
-          background-position: 48px 48px;
+      .grade-rot {
+        position: absolute;
+        left: -50%;
+        top: -50%;
+        width: 200%;
+        height: 200%;
+        transform: rotate(-8deg);
+      }
+      .grade-mov {
+        position: absolute;
+        inset: 0;
+        animation: gradeMove 18s linear infinite;
+      }
+      @keyframes gradeMove {
+        from { transform: translate(-96px, -96px); }
+        to { transform: translate(0, 0); }
+      }
+      .grade-fina {
+        background-image: linear-gradient(rgba(255, 255, 255, 0.022) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
+        background-size: 24px 24px;
+      }
+      .grade-maior {
+        background-image: linear-gradient(rgba(255, 255, 255, 0.055) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.055) 1px, transparent 1px);
+        background-size: 96px 96px;
+      }
+      @property --lx {
+        syntax: '<percentage>';
+        inherits: false;
+        initial-value: 50%;
+      }
+      @property --ly {
+        syntax: '<percentage>';
+        inherits: false;
+        initial-value: 45%;
+      }
+      .grade-acesa {
+        background-image: linear-gradient(rgba(70, 227, 190, 0.45) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(70, 227, 190, 0.45) 1px, transparent 1px);
+        background-size: 96px 96px;
+        mask-image: radial-gradient(circle at var(--lx) var(--ly), #000 0, rgba(0, 0, 0, 0.3) 180px, transparent 420px);
+        -webkit-mask-image: radial-gradient(circle at var(--lx) var(--ly), #000 0, rgba(0, 0, 0, 0.3) 180px, transparent 420px);
+        animation: luzX 23s ease-in-out infinite alternate, luzY 17s ease-in-out infinite alternate;
+      }
+      @keyframes luzX {
+        from { --lx: 36%; }
+        to { --lx: 64%; }
+      }
+      @keyframes luzY {
+        from { --ly: 34%; }
+        to { --ly: 58%; }
+      }
+      /* Pulsos de luz correndo pelas linhas da grade */
+      .pulso-grade {
+        position: absolute;
+        pointer-events: none;
+        filter: drop-shadow(0 0 4px rgba(70, 227, 190, 0.8));
+      }
+      .pulso-grade.h {
+        left: 0;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(70, 227, 190, 0.9));
+      }
+      .pulso-grade.v {
+        top: 0;
+        width: 1px;
+        background: linear-gradient(180deg, transparent, rgba(70, 227, 190, 0.9));
+      }
+      .pulso-grade.h.rev {
+        background: linear-gradient(270deg, transparent, rgba(70, 227, 190, 0.9));
+      }
+      .pulso-grade.v.rev {
+        background: linear-gradient(0deg, transparent, rgba(70, 227, 190, 0.9));
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .grade-mov,
+        .grade-acesa,
+        .logo-cursor-pisca,
+        .trace-bar {
+          animation: none !important;
         }
       }
       /* Anel Giratório do Avatar */
@@ -100,6 +163,15 @@
       @keyframes ring {
         to {
           --a: 360deg;
+        }
+      }
+      /* Cursor da logo digitando */
+      .logo-cursor-pisca {
+        animation: logoPisca 0.9s steps(1) infinite;
+      }
+      @keyframes logoPisca {
+        50% {
+          opacity: 0;
         }
       }
       /* Traço de Luz Animado abaixo do Título */
